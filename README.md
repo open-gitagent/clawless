@@ -1,12 +1,19 @@
-<p align="center">
-  <img src="clawless_readme.png" alt="ClawLess" width="200" />
-</p>
-
-<h1 align="center">ClawLess</h1>
-
-<p align="center">
-  <strong>A serverless browser-based runtime for Claw AI Agents powered by WebContainers</strong>
-</p>
+<table align="center">
+  <tr>
+    <td align="center" width="250">
+      <img src="clawless_readme.png" alt="ClawLess" width="200" />
+    </td>
+    <td>
+      <h1>ClawLess</h1>
+      <p><strong>A serverless browser-based runtime for Claw AI Agents powered by WebContainers</strong></p>
+      <ul>
+        <li>Run Claw Agents without a Server (on-browser)</li>
+        <li>Complete Audit &amp; Policy driven sandboxing</li>
+        <li>Built on <a href="https://gitagent.sh">GitAgent</a> Standard</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/clawless-runtime"><img src="https://img.shields.io/npm/v/clawless-runtime?color=cb3837&label=npm&logo=npm" alt="npm version" /></a>
