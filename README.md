@@ -7,7 +7,7 @@
       <h1>ClawLess</h1>
       <p><strong>A serverless browser-based runtime for Claw AI Agents powered by WebContainers</strong></p>
       <ul>
-        <li>Run Claw Agents without a Server (on-browser)</li>
+        <li>Run Claw Agents without a Server — entirely on-browser via WebContainers (WASM)</li>
         <li>Complete Audit &amp; Policy driven sandboxing</li>
         <li>Built on <a href="https://gitagent.sh">GitAgent</a> Standard</li>
       </ul>
