@@ -5,7 +5,7 @@
     </td>
     <td>
       <h1>ClawLess</h1>
-      <p><em>No server required to run Claw Agents.</em></p>
+      <p><em>No server required to run Claw Agents, use ClawLess to run on browser!</em></p>
       <p><strong>A serverless browser-based runtime for Claw AI Agents powered by WebContainers</strong></p>
       <ul>
         <li>Run Claw Agents without a Server — entirely on-browser via WebContainers (WASM)</li>
