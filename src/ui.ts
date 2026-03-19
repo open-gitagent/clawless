@@ -70,6 +70,9 @@ export class UIManager {
     this.populateModelOptions();
     this.restoreConfig();
     this.bindRepoControls();
+    this.bindUploadButton();
+    this.bindAttachButton();
+    this.bindDragDrop();
   }
 
   /** Auto-open the browser preview tab on initial load. */
@@ -120,6 +123,124 @@ export class UIManager {
   showConfigPanel(): void {
     this.openPanel('config-panel');
     document.getElementById('btn-config')!.classList.add('active');
+  }
+
+  // ─── Upload to workspace ──────────────────────────────────────────────────
+
+  private bindUploadButton(): void {
+    const btn = document.getElementById('btn-upload-files')!;
+    const input = document.getElementById('file-upload-input') as HTMLInputElement;
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', async () => {
+      if (!input.files || input.files.length === 0) return;
+      await this.uploadFilesToWorkspace(Array.from(input.files));
+      input.value = '';
+    });
+  }
+
+  private async uploadFilesToWorkspace(files: File[]): Promise<void> {
+    for (const file of files) {
+      const fullPath = `workspace/${file.name}`;
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      const isBinary = bytes.some(b => b === 0);
+      try {
+        if (isBinary) {
+          await this.container.writeFileBytes(fullPath, bytes);
+        } else {
+          const text = new TextDecoder().decode(bytes);
+          await this.container.writeFile(fullPath, text);
+        }
+        this.audit.log('file.upload', fullPath, { size: file.size }, { source: 'user' });
+      } catch (e) {
+        console.error(`Failed to upload ${file.name}:`, e);
+      }
+    }
+    this.refreshFileTree();
+  }
+
+  // ─── Attach context to agent ───────────────────────────────────────────────
+
+  private bindAttachButton(): void {
+    const btn = document.getElementById('btn-attach-context')!;
+    const input = document.getElementById('context-file-input') as HTMLInputElement;
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', async () => {
+      if (!input.files || input.files.length === 0) return;
+      await this.sendFilesAsContext(Array.from(input.files));
+      input.value = '';
+    });
+  }
+
+  private async sendFilesAsContext(files: File[]): Promise<void> {
+    for (const file of files) {
+      // Reject binary files
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      if (bytes.some(b => b === 0)) {
+        this.setStatusMessage(`Cannot attach binary file: ${file.name}`);
+        continue;
+      }
+      if (buffer.byteLength > 524288) {
+        this.setStatusMessage(`File too large (max 512KB): ${file.name}`);
+        continue;
+      }
+      const text = new TextDecoder().decode(bytes);
+      try {
+        await this.container.sendContextToAgent(file.name, text);
+      } catch (e) {
+        this.setStatusMessage(`Failed to send context: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  private setStatusMessage(msg: string): void {
+    const bar = document.getElementById('bottom-bar');
+    if (!bar) return;
+    const desc = bar.querySelector('.bottom-bar-desc');
+    if (desc) {
+      const original = desc.textContent;
+      desc.textContent = msg;
+      setTimeout(() => { desc.textContent = original; }, 4000);
+    }
+  }
+
+  // ─── Drag and drop ─────────────────────────────────────────────────────────
+
+  private bindDragDrop(): void {
+    const filetreeList = document.getElementById('filetree-list')!;
+    const terminalPanel = document.getElementById('terminal-panel')!;
+
+    // File tree drop → upload to workspace
+    this.setupDropZone(filetreeList, 'drag-over', async (files) => {
+      await this.uploadFilesToWorkspace(files);
+    });
+
+    // Terminal drop → inject as context
+    this.setupDropZone(terminalPanel, 'drag-over', async (files) => {
+      await this.sendFilesAsContext(files);
+    });
+  }
+
+  private setupDropZone(el: HTMLElement, hoverClass: string, handler: (files: File[]) => Promise<void>): void {
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.add(hoverClass);
+    });
+    el.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove(hoverClass);
+    });
+    el.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove(hoverClass);
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        await handler(Array.from(e.dataTransfer.files));
+      }
+    });
   }
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────────────
@@ -280,6 +401,10 @@ export class UIManager {
 
       if (!isDir) {
         item.addEventListener('click', () => this.openFile(f, name));
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          this.showFileContextMenu(e as MouseEvent, f, name);
+        });
       }
       list.appendChild(item);
     }
@@ -287,6 +412,42 @@ export class UIManager {
     if (files.length === 0) {
       list.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:11px;">No files yet</div>';
     }
+  }
+
+  private showFileContextMenu(e: MouseEvent, relativePath: string, filename: string): void {
+    // Remove any existing context menu
+    document.querySelector('.ft-context-menu')?.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'ft-context-menu';
+    menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999;`;
+
+    const sendItem = document.createElement('div');
+    sendItem.className = 'ft-context-item';
+    sendItem.textContent = 'Send to Agent';
+    sendItem.addEventListener('click', async () => {
+      menu.remove();
+      const fullPath = `workspace/${relativePath}`;
+      try {
+        if (this.isBinaryFile(filename)) {
+          this.setStatusMessage(`Cannot send binary file as context: ${filename}`);
+          return;
+        }
+        const content = await this.container.readFile(fullPath);
+        if (content.length > 524288) {
+          this.setStatusMessage(`File too large (max 512KB): ${filename}`);
+          return;
+        }
+        await this.container.sendContextToAgent(filename, content);
+      } catch (err) {
+        this.setStatusMessage(`Failed: ${(err as Error).message}`);
+      }
+    });
+    menu.appendChild(sendItem);
+    document.body.appendChild(menu);
+
+    const dismiss = () => { menu.remove(); document.removeEventListener('click', dismiss); };
+    setTimeout(() => document.addEventListener('click', dismiss), 0);
   }
 
   // ─── Tab management ─────────────────────────────────────────────────────────
@@ -326,7 +487,7 @@ export class UIManager {
     overlay.querySelector('#btn-binary-download')!.addEventListener('click', async () => {
       try {
         const buffer = await this.container.readFileBuffer(fullPath);
-        const blob = new Blob([buffer]);
+        const blob = new Blob([buffer as unknown as BlobPart]);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

@@ -19,7 +19,9 @@ export type AuditEvent =
   | 'net.request'
   | 'net.response'
   | 'git.clone'
-  | 'git.push';
+  | 'git.push'
+  | 'file.upload'
+  | 'context.inject';
 
 export interface AuditEntry {
   timestamp: string;

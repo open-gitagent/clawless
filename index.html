@@ -55,7 +55,11 @@
         <aside id="filetree">
           <div class="filetree-header">
             <span>WORKSPACE</span>
-            <button id="btn-refresh-tree" title="Refresh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+            <div class="filetree-header-actions">
+              <button id="btn-upload-files" title="Upload files"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
+              <button id="btn-refresh-tree" title="Refresh"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+            </div>
+            <input type="file" id="file-upload-input" multiple hidden />
           </div>
           <div id="filetree-list"></div>
         </aside>
@@ -84,7 +88,7 @@
                 <input id="audit-search" type="text" placeholder="Search logs…" />
                 <select id="audit-filter-source"><option value="">All Sources</option><option value="boot">boot</option><option value="user">user</option><option value="agent">agent</option><option value="system">system</option><option value="policy">policy</option></select>
                 <select id="audit-filter-level"><option value="">All Levels</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
-                <select id="audit-filter-event"><option value="">All Events</option><option value="process.spawn">process.spawn</option><option value="process.exit">process.exit</option><option value="file.read">file.read</option><option value="file.write">file.write</option><option value="io.stdout">io.stdout</option><option value="io.stdin">io.stdin</option><option value="env.configure">env.configure</option><option value="server.ready">server.ready</option><option value="status.change">status.change</option><option value="policy.deny">policy.deny</option><option value="policy.load">policy.load</option><option value="boot.mount">boot.mount</option><option value="net.request">net.request</option><option value="net.response">net.response</option><option value="git.clone">git.clone</option><option value="git.push">git.push</option></select>
+                <select id="audit-filter-event"><option value="">All Events</option><option value="process.spawn">process.spawn</option><option value="process.exit">process.exit</option><option value="file.read">file.read</option><option value="file.write">file.write</option><option value="io.stdout">io.stdout</option><option value="io.stdin">io.stdin</option><option value="env.configure">env.configure</option><option value="server.ready">server.ready</option><option value="status.change">status.change</option><option value="policy.deny">policy.deny</option><option value="policy.load">policy.load</option><option value="boot.mount">boot.mount</option><option value="net.request">net.request</option><option value="net.response">net.response</option><option value="git.clone">git.clone</option><option value="git.push">git.push</option><option value="file.upload">file.upload</option><option value="context.inject">context.inject</option></select>
                 <input id="audit-date-from" type="datetime-local" title="From" />
                 <input id="audit-date-to" type="datetime-local" title="To" />
                 <button id="btn-audit-download" class="btn-icon" title="Download Logs"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
@@ -117,6 +121,10 @@
           </div>
           <div class="resize-handle resize-v" id="resize-editor-terminal"></div>
           <div id="terminal-panel">
+            <div class="terminal-toolbar">
+              <button id="btn-attach-context" title="Attach file as context"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+              <input type="file" id="context-file-input" multiple hidden />
+            </div>
             <div id="terminal-container"></div>
           </div>
         </div>

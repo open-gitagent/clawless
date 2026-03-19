@@ -68,12 +68,22 @@ export interface ClawContainerPlugin {
   onDestroy?(cc: ClawContainerSDK): void;
 }
 
+/** Payload for injecting file context into a running agent. */
+export interface ContextPayload {
+  type: 'file';
+  name: string;
+  content: string;
+  mime?: string;
+}
+
 /** Event map for ClawContainer typed events. */
 export type ClawContainerEvents = {
   ready: [];
   error: [error: Error];
   status: [status: string];
   'file.change': [path: string];
+  'file.upload': [path: string, size: number];
+  'context.inject': [name: string];
   'process.exit': [code: number];
   'server.ready': [port: number, url: string];
   log: [entry: AuditEntry];
@@ -99,7 +109,10 @@ export interface ClawContainerSDK {
     mkdir(path: string): Promise<void>;
     remove(path: string): Promise<void>;
     grep(pattern: string | RegExp, dir?: string): Promise<Array<{ path: string; line: number; text: string }>>;
+    writeBytes(path: string, content: Uint8Array): Promise<void>;
+    upload(files: FileList | File[], targetDir?: string): Promise<string[]>;
   };
+  sendContext(ctx: ContextPayload): Promise<void>;
   git: {
     clone(url: string, token?: string): Promise<void>;
     push(message?: string): Promise<string>;

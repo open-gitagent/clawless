@@ -17,6 +17,7 @@ import type {
   ClawContainerEvents,
   ClawContainerSDK,
   TabDefinition,
+  ContextPayload,
 } from './types.js';
 import {
   type ContainerTemplate,
@@ -307,6 +308,36 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     remove: (path: string): Promise<void> => {
       return this._container.remove(path);
     },
+    writeBytes: (path: string, content: Uint8Array): Promise<void> => {
+      return this._container.writeFileBytes(path, content);
+    },
+    upload: async (files: FileList | File[], targetDir?: string): Promise<string[]> => {
+      const fileArray = Array.from(files);
+      const dir = targetDir ?? 'workspace';
+      const writtenPaths: string[] = [];
+      for (const file of fileArray) {
+        const fullPath = `${dir}/${file.name}`;
+        // Ensure parent dir exists
+        const parts = fullPath.split('/');
+        for (let i = 1; i < parts.length - 1; i++) {
+          const d = parts.slice(0, i + 1).join('/');
+          try { await this._container.mkdir(d); } catch { /* exists */ }
+        }
+        const buffer = await file.arrayBuffer();
+        // Detect text vs binary by trying to decode
+        const bytes = new Uint8Array(buffer);
+        const isBinary = bytes.some(b => b === 0);
+        if (isBinary) {
+          await this._container.writeFileBytes(fullPath, bytes);
+        } else {
+          const text = new TextDecoder().decode(bytes);
+          await this._container.writeFile(fullPath, text);
+        }
+        writtenPaths.push(fullPath);
+        this.emit('file.upload', fullPath, file.size);
+      }
+      return writtenPaths;
+    },
     grep: async (pattern: string | RegExp, dir?: string): Promise<Array<{ path: string; line: number; text: string }>> => {
       const re = typeof pattern === 'string' ? new RegExp(pattern, 'i') : pattern;
       const paths = await this._container.listWorkspaceFiles(dir);
@@ -326,6 +357,14 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
       return results;
     },
   };
+
+  // ─── Context injection ──────────────────────────────────────────────────
+
+  async sendContext(ctx: ContextPayload): Promise<void> {
+    if (ctx.content.length > 524288) throw new Error('Context too large (max 512KB)');
+    await this._container.sendContextToAgent(ctx.name, ctx.content);
+    this.emit('context.inject', ctx.name);
+  }
 
   // ─── Git ──────────────────────────────────────────────────────────────────
 

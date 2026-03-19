@@ -683,6 +683,25 @@ export class ContainerManager {
     this.audit?.log('file.write', `remove ${path}`, undefined, { source: 'user' });
   }
 
+  /** Write binary data to a file inside the container. */
+  async writeFileBytes(path: string, content: Uint8Array): Promise<void> {
+    if (!this.wc) throw new Error('Container not booted');
+    this.enforcePolicy('file.write', path, { size: content.byteLength });
+    this.audit?.log('file.write', path, { length: content.byteLength, binary: true }, { source: 'user' });
+    await this.wc.fs.writeFile(path, content);
+    for (const fn of this.fileChangeListeners) fn(path);
+  }
+
+  /** Send context to the running agent via the __CLAWLESS_CONTEXT__ protocol. */
+  async sendContextToAgent(name: string, content: string): Promise<void> {
+    if (!this.shellWriter) throw new Error('No active agent process');
+    if (content.length > 524288) throw new Error('Context too large (max 512KB)');
+    const meta = JSON.stringify({ type: 'file', name, size: content.length });
+    const envelope = `__CLAWLESS_CONTEXT_START__\n${meta}\n${content}\n__CLAWLESS_CONTEXT_END__\n`;
+    await this.shellWriter.write(envelope);
+    this.audit?.log('context.inject', name, { size: content.length }, { source: 'user' });
+  }
+
   /** Start watching the workspace directory for file-system events. */
   startWatching(): void {
     if (!this.wc) return;
