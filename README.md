@@ -62,6 +62,14 @@ The agent runs inside a WebContainer with full virtual filesystem access — rea
 
 Every action inside the container is tracked end-to-end: process lifecycle, file I/O, network requests/responses, environment configuration, and policy enforcement. Sensitive headers like API keys are automatically masked. Filter by source, level, or event type — and download the full audit log for compliance and debugging.
 
+<p align="center">
+  <img src="screenshot-policy.png" alt="ClawLess — YAML-based policy engine for agent guardrails" width="900" />
+</p>
+
+<p align="center"><em>Declarative YAML policy engine — define exactly what agents can and cannot do.</em></p>
+
+Control agent behavior with a built-in policy system. Define file access rules, allowed processes, port bindings, and runtime limits like max file size, max processes, max turns, and timeout — all in a simple YAML format. Policies are enforced at the container level, so agents cannot bypass them. Apply or reset policies on the fly without restarting the container.
+
 ---
 
 ## Key Features
