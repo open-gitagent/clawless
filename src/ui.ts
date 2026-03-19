@@ -140,11 +140,21 @@ export class UIManager {
 
   private async uploadFilesToWorkspace(files: File[]): Promise<void> {
     for (const file of files) {
-      const fullPath = `workspace/${file.name}`;
+      // Use webkitRelativePath for folder drops, otherwise just the filename
+      const relativeName = (file as any).webkitRelativePath || file.name;
+      // Strip any leading slashes or path traversal, always land in workspace/
+      const safeName = relativeName.replace(/^[./\\]+/, '').replace(/\.\.\//g, '');
+      const fullPath = `workspace/${safeName}`;
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       const isBinary = bytes.some(b => b === 0);
       try {
+        // Ensure parent dirs exist
+        const parts = fullPath.split('/');
+        for (let i = 1; i < parts.length - 1; i++) {
+          const dir = parts.slice(0, i + 1).join('/');
+          try { await this.container.mkdir(dir); } catch { /* exists */ }
+        }
         if (isBinary) {
           await this.container.writeFileBytes(fullPath, bytes);
         } else {
