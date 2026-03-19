@@ -2,15 +2,35 @@
   <img src="logo.png" alt="ClawLess" width="200" />
 </p>
 
-# ClawLess
+<h1 align="center">ClawLess</h1>
 
-**A ClawContainer for AI Agents**
+<p align="center">
+  <strong>A serverless browser-based runtime for Claw AI Agents powered by WebContainers</strong>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub stars](https://img.shields.io/github/stars/open-gitagent/clawless?style=social)](https://github.com/open-gitagent/clawless)
+<p align="center">
+  <a href="https://www.npmjs.com/package/clawless-runtime"><img src="https://img.shields.io/npm/v/clawless-runtime?color=cb3837&label=npm&logo=npm" alt="npm version" /></a>
+  <a href="https://github.com/open-gitagent/clawless/releases"><img src="https://img.shields.io/github/v/release/open-gitagent/clawless?color=blue&logo=github" alt="GitHub release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/open-gitagent/clawless/stargazers"><img src="https://img.shields.io/github/stars/open-gitagent/clawless?style=social" alt="GitHub stars" /></a>
+  <a href="https://github.com/open-gitagent/clawless/issues"><img src="https://img.shields.io/github/issues/open-gitagent/clawless?color=yellow" alt="GitHub issues" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
+  <img src="https://img.shields.io/badge/TypeScript-5.4-blue?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/WebContainers-WASM-orange?logo=webassembly&logoColor=white" alt="WebContainers" />
+  <img src="https://img.shields.io/badge/platform-browser-lightgrey?logo=googlechrome&logoColor=white" alt="Platform: Browser" />
+</p>
 
-Browser-based AI agent runtime powered by WebContainers. Run, observe, and control AI agents entirely in the browser — no backend required.
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="DOCS.md">Documentation</a> &middot;
+  <a href="#sdk-usage">SDK Usage</a> &middot;
+  <a href="CONTRIBUTING.md">Contributing</a> &middot;
+  <a href="https://github.com/open-gitagent/clawless/discussions">Discussions</a>
+</p>
+
+---
+
+Run, observe, and control AI agents entirely in the browser — no backend required. ClawLess provides a full sandboxed Node.js environment via WebContainers (WASM) with built-in editor, terminal, policy engine, and audit logging.
 
 ---
 
@@ -30,16 +50,22 @@ Browser-based AI agent runtime powered by WebContainers. Run, observe, and contr
 ## Quick Start
 
 ```bash
+# Run locally
 git clone https://github.com/open-gitagent/clawless.git
 cd clawless
 npm install
 npm run dev
 ```
 
+```bash
+# Install as a dependency
+npm install clawless-runtime
+```
+
 ## SDK Usage
 
 ```typescript
-import { ClawContainer } from 'clawless';
+import { ClawContainer } from 'clawless-runtime';
 
 const cc = new ClawContainer('#app', {
   template: 'gitclaw',
@@ -84,8 +110,38 @@ All runtime state is persisted to `localStorage` under the `clawchef_` prefix, s
 
 ## Links
 
-[Documentation](DOCS.md) | [Contributing](CONTRIBUTING.md) | [Code of Conduct](CODE_OF_CONDUCT.md) | [License](LICENSE)
+## Supported Providers
+
+| Provider | Models |
+|---|---|
+| **Anthropic** | Claude Sonnet, Claude Opus, Claude Haiku |
+| **OpenAI** | GPT-4o, GPT-4, GPT-3.5 |
+| **Google** | Gemini Pro, Gemini Flash |
+
+## Roadmap
+
+- [ ] Custom agent template marketplace
+- [ ] Multi-agent orchestration
+- [ ] Persistent filesystem across sessions
+- [ ] Cloud deployment support
+- [ ] Built-in agent debugging tools
+
+## Community
+
+- [GitHub Discussions](https://github.com/open-gitagent/clawless/discussions) — ask questions, share ideas
+- [Issues](https://github.com/open-gitagent/clawless/issues) — report bugs, request features
+- [Contributing Guide](CONTRIBUTING.md) — how to contribute
+
+## Links
+
+[Documentation](DOCS.md) | [Contributing](CONTRIBUTING.md) | [License](LICENSE) | [GitAgent Standard](https://gitagent.sh)
 
 ---
 
-Built with care by [Shreyas Kapale](https://github.com/shreyaskapale) / [Lyzr](https://lyzr.ai)
+<p align="center">
+  Built with care by <a href="https://github.com/shreyaskapale">Shreyas Kapale</a> / <a href="https://lyzr.ai">Lyzr</a>
+</p>
+
+<p align="center">
+  <sub>If ClawLess helps you, consider giving it a star on GitHub!</sub>
+</p>
