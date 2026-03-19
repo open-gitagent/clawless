@@ -361,7 +361,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
   // ─── Context injection ──────────────────────────────────────────────────
 
   async sendContext(ctx: ContextPayload): Promise<void> {
-    if (ctx.content.length > 524288) throw new Error('Context too large (max 512KB)');
+    if (ctx.content.length > 1048576) throw new Error('Context too large (max 1MB)');
     await this._container.sendContextToAgent(ctx.name, ctx.content);
     this.emit('context.inject', ctx.name);
   }

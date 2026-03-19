@@ -174,20 +174,24 @@ export class UIManager {
 
   private async sendFilesAsContext(files: File[]): Promise<void> {
     for (const file of files) {
-      // Reject binary files
       const buffer = await file.arrayBuffer();
+      if (buffer.byteLength > 1048576) {
+        this.setStatusMessage(`File too large (max 1MB): ${file.name}`);
+        continue;
+      }
       const bytes = new Uint8Array(buffer);
-      if (bytes.some(b => b === 0)) {
-        this.setStatusMessage(`Cannot attach binary file: ${file.name}`);
-        continue;
-      }
-      if (buffer.byteLength > 524288) {
-        this.setStatusMessage(`File too large (max 512KB): ${file.name}`);
-        continue;
-      }
-      const text = new TextDecoder().decode(bytes);
+      const isBinary = bytes.some(b => b === 0);
       try {
-        await this.container.sendContextToAgent(file.name, text);
+        if (isBinary) {
+          // Base64-encode binary files
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const b64 = btoa(binary);
+          await this.container.sendContextToAgent(file.name, b64, 'base64');
+        } else {
+          const text = new TextDecoder().decode(bytes);
+          await this.container.sendContextToAgent(file.name, text);
+        }
       } catch (e) {
         this.setStatusMessage(`Failed to send context: ${(e as Error).message}`);
       }
@@ -430,15 +434,22 @@ export class UIManager {
       const fullPath = `workspace/${relativePath}`;
       try {
         if (this.isBinaryFile(filename)) {
-          this.setStatusMessage(`Cannot send binary file as context: ${filename}`);
-          return;
+          const bytes = await this.container.readFileBuffer(fullPath);
+          if (bytes.length > 1048576) {
+            this.setStatusMessage(`File too large (max 1MB): ${filename}`);
+            return;
+          }
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          await this.container.sendContextToAgent(filename, btoa(binary), 'base64');
+        } else {
+          const content = await this.container.readFile(fullPath);
+          if (content.length > 1048576) {
+            this.setStatusMessage(`File too large (max 1MB): ${filename}`);
+            return;
+          }
+          await this.container.sendContextToAgent(filename, content);
         }
-        const content = await this.container.readFile(fullPath);
-        if (content.length > 524288) {
-          this.setStatusMessage(`File too large (max 512KB): ${filename}`);
-          return;
-        }
-        await this.container.sendContextToAgent(filename, content);
       } catch (err) {
         this.setStatusMessage(`Failed: ${(err as Error).message}`);
       }

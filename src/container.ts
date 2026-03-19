@@ -693,13 +693,18 @@ export class ContainerManager {
   }
 
   /** Send context to the running agent via the __CLAWLESS_CONTEXT__ protocol. */
-  async sendContextToAgent(name: string, content: string): Promise<void> {
+  async sendContextToAgent(name: string, content: string, encoding?: 'base64'): Promise<void> {
     if (!this.shellWriter) throw new Error('No active agent process');
-    if (content.length > 524288) throw new Error('Context too large (max 512KB)');
-    const meta = JSON.stringify({ type: 'file', name, size: content.length });
+    if (content.length > 1048576) throw new Error('Context too large (max 1MB)');
+    const meta = JSON.stringify({
+      type: 'file',
+      name,
+      size: content.length,
+      ...(encoding ? { encoding } : {}),
+    });
     const envelope = `__CLAWLESS_CONTEXT_START__\n${meta}\n${content}\n__CLAWLESS_CONTEXT_END__\n`;
     await this.shellWriter.write(envelope);
-    this.audit?.log('context.inject', name, { size: content.length }, { source: 'user' });
+    this.audit?.log('context.inject', name, { size: content.length, ...(encoding ? { encoding } : {}) }, { source: 'user' });
   }
 
   /** Start watching the workspace directory for file-system events. */
