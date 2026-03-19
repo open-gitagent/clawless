@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="ClawLess" width="200" />
+  <img src="black_logo.png" alt="ClawLess" width="200" />
 </p>
 
 <h1 align="center">ClawLess</h1>
