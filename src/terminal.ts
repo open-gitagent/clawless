@@ -61,9 +61,14 @@ export class TerminalManager {
     this.xterm.write(data);
   }
 
-  /** Register a handler for user keystrokes (sent to shell stdin). */
+  private onDataDisposable: { dispose(): void } | null = null;
+
+  /** Register a single handler for user keystrokes (sent to shell stdin). */
   onData(handler: (data: string) => void): void {
-    this.xterm.onData(handler);
+    if (this.onDataDisposable) {
+      this.onDataDisposable.dispose();
+    }
+    this.onDataDisposable = this.xterm.onData(handler);
   }
 
   /** Current terminal dimensions for pty resize. */
