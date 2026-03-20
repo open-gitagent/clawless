@@ -19,6 +19,9 @@ export class ContainerManager {
   private wc: WebContainer | null = null;
   private shellProcess: WebContainerProcess | null = null;
   private shellWriter: WritableStreamDefaultWriter<string> | null = null;
+  // Map of dynamic shell id → process/writer
+  private shellProcesses = new Map<string, WebContainerProcess>();
+  private shellWriters = new Map<string, WritableStreamDefaultWriter<string>>();
   private _status: ContainerStatus = 'booting';
   private onStatusChange?: (s: ContainerStatus) => void;
 
@@ -453,6 +456,57 @@ export class ContainerManager {
     if (!this.shellProcess) return;
     const { cols, rows } = terminal.dimensions;
     this.shellProcess.resize({ cols, rows });
+  }
+
+
+  /** Spawn an independent interactive jsh shell identified by `id`. */
+  async spawnShell(id: string, terminal: TerminalManager): Promise<void> {
+    if (!this.wc) throw new Error('Container not booted');
+
+    const { cols, rows } = terminal.dimensions;
+    const homeDir = await this.getHomeDir();
+
+    this.enforcePolicy('process.spawn', '/bin/jsh --osc', { activeProcesses: this.activeProcessCount });
+    this.audit?.log('process.spawn', `/bin/jsh --osc (shell:${id})`, undefined, { source: 'user' });
+    this.activeProcessCount++;
+
+    const proc = await this.wc.spawn('/bin/jsh', ['--osc'], {
+      terminal: { cols, rows },
+      env: {
+        ...this.apiEnvVars,
+        PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+        HOME: homeDir,
+        NODE_OPTIONS: `--require ${homeDir}/network-hook.cjs`,
+      },
+    });
+
+    this.shellProcesses.set(id, proc);
+
+    proc.output.pipeTo(
+      new WritableStream({
+        write: (chunk) => {
+          this.processOutputChunk(chunk, terminal, 'user');
+        },
+      }),
+    );
+
+    const writer = proc.input.getWriter();
+    this.shellWriters.set(id, writer);
+
+    terminal.onData((data) => {
+      writer.write(data);
+      this.audit?.logStdin(data);
+    });
+
+    await writer.write('cd workspace\nclear\n');
+
+    // Keep xterm in sync with container process when terminal is resized
+    window.addEventListener('resize', () => {
+      const p = this.shellProcesses.get(id);
+      if (!p) return;
+      const { cols, rows } = terminal.dimensions;
+      p.resize({ cols, rows });
+    });
   }
 
   async sendToShell(command: string): Promise<void> {
