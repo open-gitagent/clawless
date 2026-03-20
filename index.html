@@ -117,7 +117,22 @@
           </div>
           <div class="resize-handle resize-v" id="resize-editor-terminal"></div>
           <div id="terminal-panel">
-            <div id="terminal-container"></div>
+            <div id="terminal-tabs">
+              <div class="term-tab active" data-id="agent">
+                <span class="term-tab-label">⚙ Agent</span>
+              </div>
+              <button id="btn-add-terminal" title="New Terminal">＋</button>
+              <button id="btn-split-terminal" class="btn-icon" title="Split Terminal">⊞</button>
+            </div>
+            <div id="terminal-panes">
+              <div class="term-pane active" id="terminal-pane-agent">
+                <div class="term-pane-inner" id="terminal-container"></div>
+              </div>
+              <div class="resize-handle resize-h hidden" id="resize-terminal-split"></div>
+              <div class="term-pane hidden" id="terminal-pane-split">
+                <!-- Dynamic split pane content goes here -->
+              </div>
+            </div>
           </div>
         </div>
 

@@ -200,10 +200,74 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 
 /* ─── Terminal panel ────────────────────────────────────────────── */
 #terminal-panel { flex: 1; min-width: 0; min-height: 80px; display: flex;
-  flex-direction: column; background: var(--bg); padding: 8px; }
-#terminal-container { flex: 1; min-height: 0; }
+  flex-direction: column; background: var(--bg); }
+
+#terminal-tabs {
+  display: flex; align-items: stretch; height: 32px; flex-shrink: 0;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 0 4px; overflow-x: auto; scrollbar-width: none;
+}
+#terminal-tabs::-webkit-scrollbar { display: none; }
+
+#terminal-tabs .term-tab {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 10px 0 12px; font-size: 11px; color: var(--text-dim);
+  cursor: pointer; user-select: none; white-space: nowrap;
+  border-top-left-radius: 4px; border-top-right-radius: 4px;
+  margin-top: 4px; background: transparent; transition: all 0.1s; flex-shrink: 0;
+}
+#terminal-tabs .term-tab:hover { color: var(--text); background: var(--bg3); }
+#terminal-tabs .term-tab.active {
+  color: var(--text); background: var(--bg);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Tab label (double-click to rename) */
+.term-tab-label {
+  outline: none;
+}
+.term-tab-label[contenteditable="true"] {
+  background: var(--bg3); border-radius: 3px; padding: 0 4px; cursor: text;
+}
+
+/* Tab close button */
+.term-tab-close {
+  background: none; border: none; color: transparent; cursor: pointer;
+  font-size: 13px; padding: 0 0 0 2px; line-height: 1; flex-shrink: 0;
+  transition: color 0.15s;
+}
+.term-tab:hover .term-tab-close,
+.term-tab.active .term-tab-close { color: var(--text-dim); }
+.term-tab-close:hover { color: var(--accent) !important; }
+
+/* Add terminal + button */
+#btn-add-terminal {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 16px; padding: 0 8px; margin-top: 4px; margin-bottom: 4px;
+  border-radius: 4px; transition: color 0.15s, background 0.15s; flex-shrink: 0;
+}
+#btn-add-terminal:hover { color: var(--text); background: var(--bg3); }
+
+#btn-split-terminal {
+  margin-left: auto; margin-top: 4px; margin-bottom: 4px;
+  padding: 0 6px; font-size: 16px; flex-shrink: 0;
+}
+
+#terminal-panes {
+  flex: 1; min-height: 0; display: flex; flex-direction: row; align-items: stretch;
+  padding: 8px; background: var(--bg); overflow: hidden;
+}
+.term-pane { flex: 1; min-width: 0; display: none; flex-direction: column; }
+.term-pane.active { display: flex; }
+.term-pane-inner { flex: 1; min-height: 0; position: relative; }
+
+#terminal-panes.split-active .term-pane.active { display: flex; flex: 1; }
+#terminal-panes.split-active #terminal-pane-split { display: flex !important; flex: 1; }
+#terminal-panes.split-active #resize-terminal-split { display: block; margin: 0 2px; }
+
 .xterm { height: 100%; }
 .xterm-viewport { overflow-y: auto !important; }
+
 
 /* ─── Always-on File Tree ───────────────────────────────────────── */
 #filetree {

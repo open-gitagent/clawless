@@ -9,6 +9,9 @@ model:
   preferred: ""   # set via API config panel
   fallback: []
 tools: [cli, read, write, memory]
+plugins:
+  - "@gitagent/plugin-github"
+  - "@gitagent/plugin-exa"
 runtime:
   max_turns: 50
   timeout: 120
