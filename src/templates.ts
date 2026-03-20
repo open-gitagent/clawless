@@ -26,6 +26,44 @@ export const GITCLAW_TEMPLATE: ContainerTemplate = {
   },
 };
 
+/** Native deps that cannot run inside WebContainer's WASM sandbox. */
+const OPENCLAW_NATIVE_OVERRIDES: Record<string, string> = {
+  'sharp': 'npm:is-number@7.0.0',
+  'playwright-core': 'npm:is-number@7.0.0',
+  '@lydell/node-pty': 'npm:is-number@7.0.0',
+  'sqlite-vec': 'npm:is-number@7.0.0',
+  'node-llama-cpp': 'npm:is-number@7.0.0',
+  '@napi-rs/canvas': 'npm:is-number@7.0.0',
+  'pdfjs-dist': 'npm:is-number@7.0.0',
+  // baileys' libsignal dep uses a git-SSH URL unreachable in WebContainer
+  'libsignal': 'npm:is-number@7.0.0',
+};
+
+/** Built-in openclaw template — OpenClaw personal AI agent in WebContainer. */
+export const OPENCLAW_TEMPLATE: ContainerTemplate = {
+  name: 'openclaw',
+  description: 'OpenClaw personal AI agent template',
+  agent: {
+    package: 'openclaw',
+    version: '2026.3.13',
+    entry: '../../openclaw-start.mjs',
+    args: [],
+    env: {
+      OPENCLAW_PROFILE: 'default',
+      OPENCLAW_GATEWAY_MODE: 'local',
+      OPENCLAW_DISABLE_BONJOUR: '1',
+      OPENCLAW_GATEWAY_TOKEN: 'clawless-local-token',
+    },
+    overrides: OPENCLAW_NATIVE_OVERRIDES,
+  },
+  startupScript: 'node ../openclaw-setup.cjs',
+  workspace: {
+    'IDENTITY.md': '# Identity\n\nYou are a helpful AI assistant running inside ClawLess.\n',
+    'USER.md': '# User\n\nDefault user.\n',
+    'TOOLS.md': '# Tools\n\nNo custom tools configured.\n',
+  },
+};
+
 // ─── Template Registry ────────────────────────────────────────────────────────
 
 export class TemplateRegistry {
@@ -34,6 +72,7 @@ export class TemplateRegistry {
   constructor() {
     // Seed with built-in templates
     this.register(GITCLAW_TEMPLATE);
+    this.register(OPENCLAW_TEMPLATE);
   }
 
   register(template: ContainerTemplate): void {

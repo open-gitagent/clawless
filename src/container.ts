@@ -1,6 +1,6 @@
 import { WebContainer, type WebContainerProcess } from '@webcontainer/api';
 import type { TerminalManager } from './terminal.js';
-import { buildWorkspaceFiles, buildContainerPackageJson, GIT_STUB_JS } from './workspace.js';
+import { buildWorkspaceFiles, buildContainerPackageJson, buildStubLoaderRegister, buildStubLoaderHooks, GIT_STUB_JS, OPENCLAW_START_SCRIPT, OPENCLAW_SETUP_SCRIPT } from './workspace.js';
 import { AuditLog, type AuditSource } from './audit.js';
 import { NETWORK_HOOK_CJS } from './network-hook.js';
 import { PolicyEngine, PolicyDeniedError, type PolicyAction } from './policy.js';
@@ -145,7 +145,13 @@ export class ContainerManager {
   }
 
   /** Boot the WebContainer and mount all workspace files. */
-  async boot(opts?: { workspace?: Record<string, string>; services?: Record<string, string> }): Promise<void> {
+  async boot(opts?: {
+    workspace?: Record<string, string>;
+    services?: Record<string, string>;
+    agentPackage?: string;
+    agentVersion?: string;
+    agentOverrides?: Record<string, string>;
+  }): Promise<void> {
     this.setStatus('booting');
     this.wc = await WebContainer.boot();
 
@@ -162,12 +168,28 @@ export class ContainerManager {
       for (const fn of this.serverListeners) fn(port, url);
     });
 
-    await this.wc.mount({
-      'package.json':     { file: { contents: buildContainerPackageJson(opts?.services) } },
+    const mountTree: Record<string, any> = {
+      'package.json':     { file: { contents: buildContainerPackageJson({
+        agentPackage: opts?.agentPackage,
+        agentVersion: opts?.agentVersion,
+        extraDeps: opts?.services,
+        extraOverrides: opts?.agentOverrides,
+      }) } },
       'git-stub.js':      { file: { contents: GIT_STUB_JS } },
       'network-hook.cjs': { file: { contents: NETWORK_HOOK_CJS } },
       workspace: { directory: buildWorkspaceFiles(opts?.workspace) },
-    });
+    };
+
+    // Mount stub loader hooks when native deps are stubbed via overrides
+    if (opts?.agentOverrides && Object.keys(opts.agentOverrides).length > 0) {
+      const pkgs = Object.keys(opts.agentOverrides);
+      mountTree['stub-loader.mjs'] = { file: { contents: buildStubLoaderRegister(pkgs) } };
+      mountTree['stub-loader-hooks.mjs'] = { file: { contents: buildStubLoaderHooks(pkgs) } };
+      mountTree['openclaw-start.mjs'] = { file: { contents: OPENCLAW_START_SCRIPT } };
+      mountTree['openclaw-setup.cjs'] = { file: { contents: OPENCLAW_SETUP_SCRIPT } };
+    }
+
+    await this.wc.mount(mountTree);
 
     this.audit?.log('boot.mount', 'mounted workspace files', {
       files: ['package.json', 'git-stub.js', 'network-hook.cjs', 'workspace/'],
@@ -573,6 +595,11 @@ export class ContainerManager {
     this.audit?.log('process.spawn', spawnCmd, undefined, { source: 'agent' });
     this.activeProcessCount++;
 
+    const nodeOptions = [`--require ${homeDir}/network-hook.cjs`];
+    if (config.overrides && Object.keys(config.overrides).length > 0) {
+      nodeOptions.push(`--import ${homeDir}/stub-loader.mjs`);
+    }
+
     this.shellProcess = await this.wc.spawn('node', [entry, ...args], {
       terminal: { cols, rows },
       env: {
@@ -580,7 +607,7 @@ export class ContainerManager {
         ...config.env,
         PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
         HOME: homeDir,
-        NODE_OPTIONS: `--require ${homeDir}/network-hook.cjs`,
+        NODE_OPTIONS: nodeOptions.join(' '),
       },
     });
 

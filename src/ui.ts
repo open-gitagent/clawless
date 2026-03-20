@@ -77,6 +77,21 @@ export class UIManager {
     this.openPreviewTab();
   }
 
+  /** Navigate the preview iframe to a URL and switch to the preview tab. */
+  navigatePreview(url: string): void {
+    this.openPreviewTab().then(() => {
+      const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+      const urlInput = document.getElementById('preview-url') as HTMLInputElement;
+      const loading = document.getElementById('preview-loading')!;
+      if (iframe) {
+        iframe.src = url;
+        urlInput.value = url;
+        loading.classList.remove('hidden');
+        iframe.style.visibility = 'hidden';
+      }
+    });
+  }
+
   setStatus(status: ContainerStatus): void {
     const badge = document.getElementById('container-status')!;
     badge.className = 'status-badge';

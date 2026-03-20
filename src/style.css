@@ -41,6 +41,18 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 #progress-fill { height: 100%; width: 0%; background: var(--accent);
   transition: width 0.3s ease; }
 
+/* Template picker buttons */
+.tpl-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 28px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg2); color: var(--text); cursor: pointer;
+  transition: all 0.15s ease; min-width: 120px;
+}
+.tpl-btn-last { border-color: var(--accent); opacity: 1; }
+.tpl-btn:hover { border-color: var(--accent); background: var(--bg3); transform: translateY(-2px); }
+.tpl-btn:active { transform: translateY(0); }
+.tpl-btn strong { font-size: 13px; }
+
 /* ─── App shell ─────────────────────────────────────────────────── */
 #app { display: flex; flex-direction: column; height: 100vh; }
 

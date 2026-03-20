@@ -16,6 +16,8 @@ export interface AgentConfig {
   args?: string[];
   /** Extra environment variables for the agent process */
   env?: Record<string, string>;
+  /** npm overrides to stub out incompatible native dependencies */
+  overrides?: Record<string, string>;
 }
 
 /** Options for creating a ClawContainer instance. */
