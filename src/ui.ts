@@ -326,7 +326,7 @@ export class UIManager {
     overlay.querySelector('#btn-binary-download')!.addEventListener('click', async () => {
       try {
         const buffer = await this.container.readFileBuffer(fullPath);
-        const blob = new Blob([buffer]);
+        const blob = new Blob([buffer as unknown as BlobPart]);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
