@@ -20,10 +20,16 @@ async function main() {
   for (const [name, template] of registry) {
     const card = document.createElement('div');
     card.className = 'template-card';
-    card.innerHTML = `<div>
-      <div class="template-card-name">${template.name}</div>
-      <div class="template-card-desc">${template.description ?? ''}</div>
-    </div>`;
+    const inner = document.createElement('div');
+    const nameEl = document.createElement('div');
+    nameEl.className = 'template-card-name';
+    nameEl.textContent = template.name;
+    const descEl = document.createElement('div');
+    descEl.className = 'template-card-desc';
+    descEl.textContent = template.description ?? '';
+    inner.appendChild(nameEl);
+    inner.appendChild(descEl);
+    card.appendChild(inner);
     card.addEventListener('click', () => {
       overlay.classList.add('hidden');
       if (loadingOverlay) { loadingOverlay.style.display = ''; loadingOverlay.classList.remove('fade-out'); }

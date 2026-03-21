@@ -215,7 +215,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     } else {
       const config = agentConfig as AgentConfig;
 
-      if (this._template!.configRequired) {
+      if (template.configRequired) {
         const savedConfig = this._ui.getSavedConfig();
         if (!savedConfig) {
           this._ui.showConfigPanel();

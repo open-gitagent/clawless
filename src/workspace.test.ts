@@ -17,8 +17,18 @@ describe('buildContainerPackageJson', () => {
     expect(pkg.dependencies).toEqual({});
   });
 
+  it('produces empty deps for undefined agent', () => {
+    const pkg = JSON.parse(buildContainerPackageJson(undefined));
+    expect(pkg.dependencies).toEqual({});
+  });
+
   it('merges extraDeps', () => {
     const pkg = JSON.parse(buildContainerPackageJson({ package: 'a', entry: 'x' }, { lodash: '4' }));
     expect(pkg.dependencies).toEqual({ a: 'latest', lodash: '4' });
+  });
+
+  it('uses clawless-workspace as package name', () => {
+    const pkg = JSON.parse(buildContainerPackageJson(false));
+    expect(pkg.name).toBe('clawless-workspace');
   });
 });

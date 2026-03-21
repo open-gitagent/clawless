@@ -62,16 +62,7 @@ process.exit(0);
 
 /** Returns the FileSystem tree to mount under /workspace inside WebContainer. */
 export function buildWorkspaceFiles(extra?: Record<string, string>) {
-  const tree: Record<string, any> = {
-    'agent.yaml': { file: { contents: DEFAULT_AGENT_YAML } },
-    'SOUL.md':    { file: { contents: DEFAULT_SOUL_MD } },
-    'RULES.md':   { file: { contents: DEFAULT_RULES_MD } },
-    'memory': {
-      directory: {
-        'MEMORY.md': { file: { contents: DEFAULT_MEMORY_MD } },
-      },
-    },
-  };
+  const tree: Record<string, any> = {};
 
   // Merge user-provided flat files (e.g. 'src/index.ts': '...')
   if (extra) {
