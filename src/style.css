@@ -442,5 +442,26 @@ body.resizing-row * { cursor: row-resize !important; user-select: none !importan
 .binary-popup-actions { display: flex; gap: 10px; justify-content: center; }
 .binary-popup-actions button { min-width: 120px; }
 
+/* ─── Template Picker ──────────────────────────────────────────── */
+#template-picker-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+}
+#template-picker-overlay.hidden { display: none; }
+.picker-inner { text-align: center; max-width: 480px; width: 90%; }
+.picker-inner h2 { margin: 0 0 4px; font-size: 20px; color: #e0e0e0; }
+.picker-subtitle { margin: 0 0 24px; font-size: 13px; color: #888; }
+#template-picker-list { display: flex; flex-direction: column; gap: 12px; }
+.template-card {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px; border: 1px solid #333; border-radius: 8px;
+  background: #1a1a1a; cursor: pointer; text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.template-card:hover { border-color: #5a9; background: #1e2a22; }
+.template-card-name { font-size: 15px; font-weight: 600; color: #e0e0e0; }
+.template-card-desc { font-size: 12px; color: #888; margin-top: 2px; }
+
 /* ─── Util ──────────────────────────────────────────────────────── */
 .hidden { display: none !important; }

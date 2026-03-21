@@ -2,6 +2,8 @@
  * Default workspace files mounted into the WebContainer /workspace directory.
  */
 
+import type { AgentConfig } from './types.js';
+
 export const DEFAULT_AGENT_YAML = `spec_version: "0.1.0"
 name: my-agent
 version: 1.0.0
@@ -87,19 +89,24 @@ export function buildWorkspaceFiles(extra?: Record<string, string>) {
   return tree;
 }
 
-/** Returns the inner-container package.json that requests gitclaw. */
-export function buildContainerPackageJson(extraDeps?: Record<string, string>) {
+export function buildContainerPackageJson(
+  agentConfig: AgentConfig | false | undefined,
+  extraDeps?: Record<string, string>,
+) {
+  const agentDeps: Record<string, string> = {};
+  if (agentConfig) {
+    agentDeps[agentConfig.package] = agentConfig.version ?? 'latest';
+  }
+
   return JSON.stringify({
-    name: 'gitclaw-workspace',
+    name: 'clawless-workspace',
     version: '1.0.0',
     private: true,
-    // npm creates node_modules/.bin/git → ../../git-stub.js with execute bit
     bin: { git: './git-stub.js' },
     dependencies: {
-      gitclaw: '1.1.4',
+      ...agentDeps,
       ...extraDeps,
     },
-    // baileys has a git-SSH dep (libsignal-node) unreachable in WebContainer
     overrides: {
       'baileys': 'npm:is-number@7.0.0',
     },
