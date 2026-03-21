@@ -1,6 +1,7 @@
 // ─── Template System for ClawContainer ──────────────────────────────────────
 
 import type { AgentConfig, ClawContainerOptions, TabDefinition } from './types.js';
+import { DEFAULT_AGENT_YAML, DEFAULT_SOUL_MD, DEFAULT_RULES_MD, DEFAULT_MEMORY_MD } from './workspace.js';
 
 /** A named, reusable container configuration preset. */
 export interface ContainerTemplate {
@@ -12,6 +13,8 @@ export interface ContainerTemplate {
   env?: Record<string, string>;
   startupScript?: string;
   tabs?: TabDefinition[];
+  /** When true, show API config panel and wait before launching agent. */
+  configRequired?: boolean;
 }
 
 /** Built-in gitclaw template — mirrors the previous hardcoded defaults. */
@@ -24,6 +27,13 @@ export const GITCLAW_TEMPLATE: ContainerTemplate = {
     entry: 'dist/index.js',
     args: ['--dir', '<home>/workspace'],
   },
+  workspace: {
+    'agent.yaml': DEFAULT_AGENT_YAML,
+    'SOUL.md': DEFAULT_SOUL_MD,
+    'RULES.md': DEFAULT_RULES_MD,
+    'memory/MEMORY.md': DEFAULT_MEMORY_MD,
+  },
+  configRequired: true,
 };
 
 // ─── Template Registry ────────────────────────────────────────────────────────

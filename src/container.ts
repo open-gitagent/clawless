@@ -145,7 +145,11 @@ export class ContainerManager {
   }
 
   /** Boot the WebContainer and mount all workspace files. */
-  async boot(opts?: { workspace?: Record<string, string>; services?: Record<string, string> }): Promise<void> {
+  async boot(opts?: {
+    workspace?: Record<string, string>;
+    services?: Record<string, string>;
+    agentConfig?: AgentConfig | false;
+  }): Promise<void> {
     this.setStatus('booting');
     this.wc = await WebContainer.boot();
 
@@ -163,7 +167,7 @@ export class ContainerManager {
     });
 
     await this.wc.mount({
-      'package.json':     { file: { contents: buildContainerPackageJson(opts?.services) } },
+      'package.json':     { file: { contents: buildContainerPackageJson(opts?.agentConfig, opts?.services) } },
       'git-stub.js':      { file: { contents: GIT_STUB_JS } },
       'network-hook.cjs': { file: { contents: NETWORK_HOOK_CJS } },
       workspace: { directory: buildWorkspaceFiles(opts?.workspace) },
@@ -328,10 +332,7 @@ export class ContainerManager {
     return out.trim();
   }
 
-  /**
-   * Spawn gitclaw DIRECTLY with a PTY — not inside jsh.
-   * jsh doesn't forward the PTY to child processes, breaking interactive REPLs.
-   */
+  /** @deprecated Use startAgent(). */
   async startGitclaw(terminal: TerminalManager): Promise<void> {
     if (!this.wc) throw new Error('Container not booted');
     this.setStatus('ready');

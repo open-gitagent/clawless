@@ -58,6 +58,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
   private _options: ClawContainerOptions;
   private _selector: string;
   private _started = false;
+  private _template: ContainerTemplate | null = null;
 
   constructor(selector: string, options?: ClawContainerOptions) {
     super();
@@ -119,6 +120,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
 
     // ─── Resolve template and merge with options ───────────────────────────
     const template = resolveTemplate(this._options.template, ClawContainer._templateRegistry);
+    this._template = template;
     const opts = mergeTemplateWithOptions(template, this._options);
 
     // Dispatch plugin onInit
@@ -161,6 +163,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
       await this._container.boot({
         workspace: Object.keys(extraWorkspace).length > 0 ? extraWorkspace : undefined,
         services: Object.keys(extraServices).length > 0 ? extraServices : undefined,
+        agentConfig: opts.agent,
       });
       this._audit.log('status.change', 'webcontainer booted', undefined, { source: 'boot' });
     } catch (e) {
@@ -207,46 +210,31 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     const agentConfig = opts.agent;
 
     if (agentConfig === false) {
-      // No agent — container is ready for user to do whatever they want
       this._terminal.write('\x1b[32m[ClawLess] Ready (no agent).\x1b[0m\r\n\r\n');
       this.emit('ready');
     } else {
       const config = agentConfig as AgentConfig;
-      const isGitclaw = config.package === 'gitclaw';
 
-      if (isGitclaw) {
-        // Gitclaw flow — check API keys
+      if (template.configRequired) {
         const savedConfig = this._ui.getSavedConfig();
         if (!savedConfig) {
           this._ui.showConfigPanel();
           this._terminal.write('\x1b[33m[ClawLess] Configure your API key in the sidebar to continue.\x1b[0m\r\n\r\n');
           await this.waitForConfig();
         }
-
         const envConfig = this._ui.getSavedConfig()!;
-        this._terminal.write('\x1b[90m[ClawLess] Launching gitclaw…\x1b[0m\r\n\r\n');
-        this._audit.log('status.change', 'launching gitclaw', undefined, { source: 'boot' });
+        await this._container.configureEnv(envConfig);
+      }
 
-        try {
-          await this._container.configureEnv(envConfig);
-          await this._container.startGitclaw(this._terminal);
-        } catch (e) {
-          this._terminal.write(`\r\n\x1b[31m[ClawLess] Launch failed: ${(e as Error).message}\x1b[0m\r\n`);
-          this.emit('error', e as Error);
-          return;
-        }
-      } else {
-        // Custom agent config
-        this._terminal.write(`\x1b[90m[ClawLess] Launching agent (${config.package})…\x1b[0m\r\n\r\n`);
-        this._audit.log('status.change', `launching ${config.package}`, undefined, { source: 'boot' });
+      this._terminal.write(`\x1b[90m[ClawLess] Launching ${config.package}…\x1b[0m\r\n\r\n`);
+      this._audit.log('status.change', `launching ${config.package}`, undefined, { source: 'boot' });
 
-        try {
-          await this._container.startAgent(config, this._terminal);
-        } catch (e) {
-          this._terminal.write(`\r\n\x1b[31m[ClawLess] Agent launch failed: ${(e as Error).message}\x1b[0m\r\n`);
-          this.emit('error', e as Error);
-          return;
-        }
+      try {
+        await this._container.startAgent(config, this._terminal);
+      } catch (e) {
+        this._terminal.write(`\r\n\x1b[31m[ClawLess] Launch failed: ${(e as Error).message}\x1b[0m\r\n`);
+        this.emit('error', e as Error);
+        return;
       }
 
       this.emit('ready');
