@@ -9,7 +9,7 @@ function createBuilder() {
   }
   b.toBuffer = () => Promise.resolve(Buffer.alloc(0));
   b.toFile = () => Promise.reject(new Error('sharp unavailable in WebContainer'));
-  b.metadata = () => Promise.resolve({ width: 0, height: 0, format: 'unknown' });
+  b.metadata = () => Promise.resolve({ width: 0, height: 0, format: 'unknown', channels: 0, hasAlpha: false });
   b.clone = () => createBuilder();
   b.pipe = () => b;
   return b;

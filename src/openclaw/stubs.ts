@@ -37,6 +37,7 @@ export const STUB_FILES: Record<string, string> = {
 export const INSTALL_STUBS_SCRIPT = `
 echo "[ClawLess] Installing native dependency stubs..."
 cd ..
+[ -d node_modules ] || { echo "[ClawLess] ERROR: node_modules not found"; exit 1; }
 rm -rf node_modules/sharp && cp -r workspace/.openclaw-stubs/sharp node_modules/sharp
 mkdir -p node_modules/@lydell && rm -rf node_modules/@lydell/node-pty && cp -r workspace/.openclaw-stubs/lydell-node-pty node_modules/@lydell/node-pty
 rm -rf node_modules/playwright-core && cp -r workspace/.openclaw-stubs/playwright-core node_modules/playwright-core
