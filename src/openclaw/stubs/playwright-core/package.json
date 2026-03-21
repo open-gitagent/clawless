@@ -1,0 +1,7 @@
+{
+  "name": "playwright-core",
+  "version": "1.58.2",
+  "main": "./index.cjs",
+  "exports": { ".": { "import": "./index.mjs", "require": "./index.cjs" } },
+  "type": "commonjs"
+}

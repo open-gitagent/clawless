@@ -1,0 +1,7 @@
+{
+  "name": "sqlite-vec",
+  "version": "0.1.7",
+  "main": "./index.cjs",
+  "exports": { ".": { "import": "./index.mjs", "require": "./index.cjs" } },
+  "type": "commonjs"
+}

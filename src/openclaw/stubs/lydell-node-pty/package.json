@@ -1,0 +1,7 @@
+{
+  "name": "@lydell/node-pty",
+  "version": "1.2.0-beta.3",
+  "main": "./index.cjs",
+  "exports": { ".": { "import": "./index.mjs", "require": "./index.cjs" } },
+  "type": "commonjs"
+}
