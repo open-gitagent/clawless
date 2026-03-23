@@ -18,8 +18,8 @@ export class ClawKernelRuntime implements ContainerRuntime {
 
   constructor() {
     this._fs = new ClawFS();
-    this._proc = new ClawProc(this._fs);
     this._net = new ClawNet();
+    this._proc = new ClawProc(this._fs, this._net);
     this._pkg = new ClawPkg(this._fs);
   }
 

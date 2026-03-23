@@ -9,6 +9,8 @@
 
 import type { RuntimeProcess, SpawnOptions } from './types.js';
 import type { ClawFS } from './clawfs.js';
+import type { ClawNet } from './clawnet.js';
+import { QuickJSEngine } from './quickjs-engine.js';
 
 interface ProcessEntry {
   pid: number;
@@ -21,9 +23,11 @@ export class ClawProc {
   private processes = new Map<number, ProcessEntry>();
   private nextPid = 1;
   private fs: ClawFS;
+  private net: ClawNet | null = null;
 
-  constructor(fs: ClawFS) {
+  constructor(fs: ClawFS, net?: ClawNet) {
     this.fs = fs;
+    this.net = net ?? null;
   }
 
   /** Spawn a new process. */
@@ -124,16 +128,9 @@ export class ClawProc {
         return await this.runInteractiveShell(inputReader, outputWriter, opts);
       }
 
-      // Node.js execution — future: use QuickJS-WASM
+      // Node.js execution via QuickJS-WASM
       if (cmd === 'node') {
-        if (args.includes('-e')) {
-          // Inline script execution — future: eval via QuickJS
-          await outputWriter.write(`[ClawKernel] Executed inline script\n`);
-          return 0;
-        }
-        await outputWriter.write(`[ClawKernel] Would run: node ${args.join(' ')}\n`);
-        // Future: load QuickJS-WASM and execute the script
-        return 0;
+        return await this.runNode(args, opts, inputReader, outputWriter);
       }
 
       // npm — future: use ClawPkg
@@ -260,6 +257,60 @@ export class ClawProc {
       }
     }
     return 0;
+  }
+
+  /** Run a Node.js script via QuickJS-WASM. */
+  private async runNode(
+    args: string[],
+    opts: SpawnOptions | undefined,
+    _inputReader: ReadableStreamDefaultReader<string> | null,
+    outputWriter: WritableStreamDefaultWriter<string>,
+  ): Promise<number> {
+    let code: string;
+
+    if (args.includes('-e')) {
+      // Inline script: node -e "code"
+      code = args[args.indexOf('-e') + 1] || '';
+    } else {
+      // Script file: node path/to/script.js
+      const scriptPath = args[0];
+      if (!scriptPath) {
+        await outputWriter.write('[ClawKernel] Error: no script specified\n');
+        return 1;
+      }
+      try {
+        code = await this.fs.readFile(scriptPath, 'utf-8');
+      } catch {
+        // Try with leading slash
+        try {
+          code = await this.fs.readFile('/' + scriptPath, 'utf-8');
+        } catch {
+          await outputWriter.write(`[ClawKernel] Error: cannot read ${scriptPath}\n`);
+          return 1;
+        }
+      }
+    }
+
+    const engine = new QuickJSEngine({
+      fs: this.fs,
+      net: this.net!,
+      env: opts?.env ?? {},
+      args,
+      cwd: opts?.env?.HOME || '/home',
+      stdout: (data) => { outputWriter.write(data); },
+      stderr: (data) => { outputWriter.write(data); },
+    });
+
+    try {
+      await engine.init();
+      const exitCode = await engine.run(code, args[0] || 'inline.js');
+      return exitCode;
+    } catch (e) {
+      await outputWriter.write(`[ClawKernel] Runtime error: ${(e as Error).message}\n`);
+      return 1;
+    } finally {
+      engine.dispose();
+    }
   }
 
   /** Kill a process by PID. */

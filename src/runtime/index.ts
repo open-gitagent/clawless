@@ -6,3 +6,4 @@ export { ClawFS } from './clawfs.js';
 export { ClawProc } from './clawproc.js';
 export { ClawNet } from './clawnet.js';
 export { ClawPkg, type AgentBundle } from './clawpkg.js';
+export { QuickJSEngine } from './quickjs-engine.js';
