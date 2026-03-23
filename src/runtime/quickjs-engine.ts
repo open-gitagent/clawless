@@ -49,6 +49,19 @@ export class QuickJSEngine {
     this.installGlobals();
   }
 
+  /** Evaluate code and dispose the result handle (for setup scripts). */
+  private evalSetup(code: string): void {
+    if (!this.ctx) return;
+    const result = this.ctx.evalCode(code, '<setup>');
+    if (result.error) {
+      const err = this.ctx.dump(result.error);
+      result.error.dispose();
+      console.warn('[QuickJS setup error]', err);
+    } else {
+      result.value.dispose();
+    }
+  }
+
   /** Run JavaScript code and return exit code. */
   async run(code: string, filename = 'index.js'): Promise<number> {
     if (!this.ctx) throw new Error('Engine not initialized');
@@ -344,10 +357,8 @@ export class QuickJSEngine {
   }
 
   private installBuffer(): void {
-    const ctx = this.ctx!;
-
     // Minimal Buffer.from() shim
-    ctx.evalCode(`
+    this.evalSetup(`
       globalThis.Buffer = {
         from: function(data, encoding) {
           if (typeof data === 'string') {
@@ -364,10 +375,8 @@ export class QuickJSEngine {
   }
 
   private installRequire(): void {
-    const ctx = this.ctx!;
-
     // require() shim that returns built-in module stubs
-    ctx.evalCode(`
+    this.evalSetup(`
       globalThis.__modules = {};
 
       globalThis.__modules['fs'] = {
@@ -525,10 +534,8 @@ export class QuickJSEngine {
   }
 
   private installGlobals(): void {
-    const ctx = this.ctx!;
-
     // TextEncoder / TextDecoder stubs
-    ctx.evalCode(`
+    this.evalSetup(`
       if (typeof globalThis.TextEncoder === 'undefined') {
         globalThis.TextEncoder = function() {};
         globalThis.TextEncoder.prototype.encode = function(s) { return s; };

@@ -239,7 +239,10 @@ export class ContainerManager {
       throw new Error(`npm install failed (exit ${exitCode}):\n${tail}`);
     }
 
-    await this.linkGitStub();
+    // Only link git-stub on WebContainer (ClawKernel doesn't need it)
+    if (this.runtime instanceof WebContainerRuntime) {
+      await this.linkGitStub();
+    }
   }
 
   /**
