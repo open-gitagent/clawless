@@ -22,6 +22,8 @@ export interface AgentConfig {
 
 /** Options for creating a ClawContainer instance. */
 export interface ClawContainerOptions {
+  /** Runtime engine: 'webcontainer' (default) or 'wasm' (ClawWASM — no WebContainers). */
+  runtime?: 'webcontainer' | 'wasm';
   /** Agent to launch. Pass `false` to skip agent launch entirely. Default: gitclaw. */
   agent?: AgentConfig | false;
   /** Extra workspace files to mount: flat map of relative path → content */

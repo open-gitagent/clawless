@@ -6,6 +6,7 @@ import { NETWORK_HOOK_CJS } from './network-hook.js';
 import { PolicyEngine, PolicyDeniedError, type PolicyAction } from './policy.js';
 import { GitService, type GitFile } from './git-service.js';
 import type { AgentConfig } from './types.js';
+import { ClawWASMRuntime } from './wasm-runtime/runtime.js';
 
 export type ContainerStatus = 'booting' | 'installing' | 'ready' | 'error';
 
@@ -35,6 +36,14 @@ export class ContainerManager {
   private gitService: GitService | null = null;
 
   get status(): ContainerStatus { return this._status; }
+
+  /** Whether we're running on ClawWASM (no WebContainers). */
+  private get isWasm(): boolean { return this.wasmRuntime !== null; }
+
+  /** Check that either wc or wasmRuntime is booted. */
+  private assertBooted(): void {
+    if (!this.wc && !this.wasmRuntime) throw new Error('Container not booted');
+  }
 
   setAuditLog(a: AuditLog): void { this.audit = a; }
   setPolicy(p: PolicyEngine): void { this.policy = p; }
@@ -144,15 +153,49 @@ export class ContainerManager {
     }
   }
 
-  /** Boot the WebContainer and mount all workspace files. */
+  private wasmRuntime: ClawWASMRuntime | null = null;
+
+  /** Boot the WebContainer (or ClawWASM) and mount all workspace files. */
   async boot(opts?: {
     workspace?: Record<string, string>;
     services?: Record<string, string>;
     agentPackage?: string;
     agentVersion?: string;
     agentOverrides?: Record<string, string>;
+    runtime?: 'webcontainer' | 'wasm';
   }): Promise<void> {
     this.setStatus('booting');
+
+    // ─── ClawWASM path ──────────────────────────────────────────────────
+    if (opts?.runtime === 'wasm') {
+      this.wasmRuntime = new ClawWASMRuntime();
+      await this.wasmRuntime.boot();
+
+      this.wasmRuntime.on('server-ready', (port: number, url: string) => {
+        this.serverUrls.set(port, url);
+        this.audit?.log('server.ready', `port ${port}`, { port, url }, { source: 'system' });
+        for (const fn of this.serverListeners) fn(port, url);
+      });
+
+      const mountTree: Record<string, any> = {
+        'package.json': { file: { contents: buildContainerPackageJson({
+          agentPackage: opts?.agentPackage,
+          agentVersion: opts?.agentVersion,
+          extraDeps: opts?.services,
+          extraOverrides: opts?.agentOverrides,
+        }) } },
+        'git-stub.js': { file: { contents: GIT_STUB_JS } },
+        workspace: { directory: buildWorkspaceFiles(opts?.workspace) },
+      };
+
+      await this.wasmRuntime.mount(mountTree);
+      this.audit?.log('boot.mount', 'mounted workspace files (wasm)', {
+        files: ['package.json', 'git-stub.js', 'workspace/'],
+      }, { source: 'boot' });
+      return;
+    }
+
+    // ─── WebContainer path (default) ────────────────────────────────────
     this.wc = await WebContainer.boot();
 
     this.wc.on('server-ready', (port: number, url: string) => {
@@ -216,6 +259,24 @@ export class ContainerManager {
 
   /** Run `npm install` inside the container. All output goes to terminal. */
   async runNpmInstall(terminal: TerminalManager): Promise<void> {
+    // WASM path — use PackageLoader instead of real npm
+    if (this.isWasm) {
+      this.setStatus('installing');
+      this.audit?.log('process.spawn', 'npm install (wasm)', undefined, { source: 'boot' });
+      terminal.write('[ClawWASM] Installing packages...\r\n');
+      const proc = await this.wasmRuntime!.spawn('npm', ['install'], {});
+      const reader = proc.output.getReader();
+      (async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          terminal.write(typeof value === 'string' ? value.replace(/\n/g, '\r\n') : value);
+        }
+      })();
+      await proc.exit;
+      this.audit?.log('process.exit', 'npm install (wasm) complete', {}, { source: 'boot' });
+      return;
+    }
     if (!this.wc) throw new Error('Container not booted');
     this.setStatus('installing');
 
@@ -268,7 +329,7 @@ export class ContainerManager {
    * The key is injected directly into the shell env when startShell() is called.
    */
   async configureEnv(env: ContainerEnv): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.write', 'workspace/.env');
 
     // Use all user-supplied env vars directly
@@ -316,18 +377,28 @@ export class ContainerManager {
     for (const [key, val] of Object.entries(this.apiEnvVars)) {
       envLines.push(`${key}=${val}`);
     }
-    await this.wc.fs.writeFile('workspace/.env', envLines.join('\n') + '\n');
+    if (this.isWasm) {
+      this.wasmRuntime!.fs.writeFileSync('/workspace/.env', envLines.join('\n') + '\n');
+    } else {
+      await this.wc!.fs.writeFile('workspace/.env', envLines.join('\n') + '\n');
+    }
     this.audit?.log('file.write', 'workspace/.env', { keys: Object.keys(this.apiEnvVars) }, { source: 'system' });
 
     // Patch agent.yaml with the chosen model
     try {
-      const yaml = await this.wc.fs.readFile('workspace/agent.yaml', 'utf-8');
+      const yaml = this.isWasm
+        ? this.wasmRuntime!.fs.readFileSync('/workspace/agent.yaml', 'utf-8') as string
+        : await this.wc!.fs.readFile('workspace/agent.yaml', 'utf-8');
       this.audit?.log('file.read', 'workspace/agent.yaml', undefined, { source: 'system' });
       const patched = yaml.replace(
         /preferred:\s*"[^"]*"/,
         `preferred: "${env.model}"`,
       );
-      await this.wc.fs.writeFile('workspace/agent.yaml', patched);
+      if (this.isWasm) {
+        this.wasmRuntime!.fs.writeFileSync('/workspace/agent.yaml', patched);
+      } else {
+        await this.wc!.fs.writeFile('workspace/agent.yaml', patched);
+      }
       this.audit?.log('file.write', 'workspace/agent.yaml', { action: 'patch-model', model: env.model }, { source: 'system' });
     } catch {
       // agent.yaml might be custom — leave it
@@ -336,6 +407,7 @@ export class ContainerManager {
 
   /** Discover the container's home/project directory via $PWD. */
   private async getHomeDir(): Promise<string> {
+    if (this.isWasm) return '/';
     this.audit?.log('process.spawn', 'sh -c "echo $PWD"', undefined, { source: 'system' });
     const proc = await this.wc!.spawn('sh', ['-c', 'echo $PWD']);
     const reader = proc.output.getReader();
@@ -355,7 +427,7 @@ export class ContainerManager {
    * jsh doesn't forward the PTY to child processes, breaking interactive REPLs.
    */
   async startGitclaw(terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.setStatus('ready');
 
     const { cols, rows } = terminal.dimensions;
@@ -366,22 +438,38 @@ export class ContainerManager {
     this.audit?.log('process.spawn', spawnCmd, undefined, { source: 'agent' });
     this.activeProcessCount++;
 
-    this.shellProcess = await this.wc.spawn(
-      'node',
-      [`${homeDir}/node_modules/gitclaw/dist/index.js`, '--dir', `${homeDir}/workspace`],
-      {
-        terminal: { cols, rows },
-        env: {
-          ...this.apiEnvVars,
-          PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
-          HOME: homeDir,
-          NODE_OPTIONS: `--require ${homeDir}/network-hook.cjs`,
+    if (this.isWasm) {
+      const wasmProc = await this.wasmRuntime!.spawn(
+        'node',
+        [`${homeDir}/node_modules/gitclaw/dist/index.js`, '--dir', `${homeDir}/workspace`],
+        {
+          terminal: { cols, rows },
+          env: {
+            ...this.apiEnvVars,
+            PATH: `${homeDir}/node_modules/.bin:/usr/bin:/bin`,
+            HOME: homeDir,
+          },
         },
-      },
-    );
+      );
+      this.shellProcess = wasmProc as any;
+    } else {
+      this.shellProcess = await this.wc!.spawn(
+        'node',
+        [`${homeDir}/node_modules/gitclaw/dist/index.js`, '--dir', `${homeDir}/workspace`],
+        {
+          terminal: { cols, rows },
+          env: {
+            ...this.apiEnvVars,
+            PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+            HOME: homeDir,
+            NODE_OPTIONS: `--require ${homeDir}/network-hook.cjs`,
+          },
+        },
+      );
+    }
 
     // Wire output → terminal (with audit + network marker parsing)
-    this.shellProcess.output.pipeTo(
+    this.shellProcess!.output.pipeTo(
       new WritableStream({
         write: (chunk) => {
           this.processOutputChunk(chunk, terminal, 'agent');
@@ -390,7 +478,7 @@ export class ContainerManager {
     );
 
     // Wire keystrokes directly to gitclaw stdin (no jsh in between)
-    this.shellWriter = this.shellProcess.input.getWriter();
+    this.shellWriter = this.shellProcess!.input.getWriter();
     terminal.onData((data) => {
       this.shellWriter?.write(data);
       this.audit?.logStdin(data);
@@ -399,7 +487,7 @@ export class ContainerManager {
     window.addEventListener('resize', () => this.resizeShell(terminal));
 
     // Restart gitclaw when it exits (e.g. user types /quit)
-    this.shellProcess.exit.then((code) => {
+    this.shellProcess!.exit.then((code) => {
       this.activeProcessCount--;
       this.audit?.log('process.exit', `gitclaw exited`, { exitCode: code }, { source: 'agent' });
       terminal.write('\r\n\x1b[90m[ClawLess] gitclaw exited. Restarting in 2s…\x1b[0m\r\n');
@@ -475,34 +563,40 @@ export class ContainerManager {
   }
 
   async listWorkspaceFiles(dir = 'workspace'): Promise<string[]> {
-    if (!this.wc) return [];
-    try {
-      return await recursiveList(this.wc, dir, dir);
-    } catch {
-      return [];
+    if (this.isWasm) {
+      try { return await wasmRecursiveList(this.wasmRuntime!.fs, '/' + dir, '/' + dir); } catch { return []; }
     }
+    if (!this.wc) return [];
+    try { return await recursiveList(this.wc, dir, dir); } catch { return []; }
   }
 
   async readFile(path: string): Promise<string> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.read', path);
     this.audit?.log('file.read', path, undefined, { source: 'user' });
-    return this.wc.fs.readFile(path, 'utf-8');
+    if (this.isWasm) return this.wasmRuntime!.fs.readFileSync('/' + path, 'utf-8') as string;
+    return this.wc!.fs.readFile(path, 'utf-8');
   }
 
   /** Read a file as raw bytes (for binary download). */
   async readFileBuffer(path: string): Promise<Uint8Array> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.read', path);
     this.audit?.log('file.read', path, { binary: true }, { source: 'user' });
-    return this.wc.fs.readFile(path);
+    if (this.isWasm) return this.wasmRuntime!.fs.readFileSync('/' + path) as Uint8Array;
+    return this.wc!.fs.readFile(path);
   }
 
   async writeFile(path: string, contents: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.write', path, { size: contents.length });
     this.audit?.log('file.write', path, { length: contents.length }, { source: 'user' });
-    await this.wc.fs.writeFile(path, contents);
+    if (this.isWasm) {
+      const vfsPath = path.startsWith('/') ? path : '/' + path;
+      this.wasmRuntime!.fs.writeFileSync(vfsPath, contents);
+    } else {
+      await this.wc!.fs.writeFile(path, contents);
+    }
     for (const fn of this.fileChangeListeners) fn(path);
   }
 
@@ -696,22 +790,39 @@ export class ContainerManager {
 
   /** Create a directory inside the container. */
   async mkdir(path: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.write', path);
-    await this.wc.fs.mkdir(path, { recursive: true });
+    if (this.isWasm) {
+      this.wasmRuntime!.fs.mkdirSync(path.startsWith('/') ? path : '/' + path, { recursive: true });
+    } else {
+      await this.wc!.fs.mkdir(path, { recursive: true });
+    }
     this.audit?.log('file.write', `mkdir ${path}`, undefined, { source: 'user' });
   }
 
   /** Remove a file inside the container. */
   async remove(path: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    this.assertBooted();
     this.enforcePolicy('file.write', path);
-    await this.wc.fs.rm(path, { recursive: true });
+    if (this.isWasm) {
+      this.wasmRuntime!.fs.rmSync(path.startsWith('/') ? path : '/' + path, { recursive: true, force: true });
+    } else {
+      await this.wc!.fs.rm(path, { recursive: true });
+    }
     this.audit?.log('file.write', `remove ${path}`, undefined, { source: 'user' });
   }
 
   /** Start watching the workspace directory for file-system events. */
   startWatching(): void {
+    if (this.isWasm) {
+      this.wasmRuntime!.fs.watch('/workspace', {}, (_event, filename) => {
+        if (filename) {
+          const path = `workspace/${filename}`;
+          for (const fn of this.fileChangeListeners) fn(path);
+        }
+      });
+      return;
+    }
     if (!this.wc) return;
     this.wc.fs.watch('/workspace', { recursive: true }, (_event, filename) => {
       if (filename) {
@@ -746,5 +857,28 @@ async function recursiveList(
     }
   }
 
+  return results;
+}
+
+async function wasmRecursiveList(
+  vfs: import('./sandbox/vfs.js').VirtualFS,
+  absDir: string,
+  rootDir: string,
+): Promise<string[]> {
+  const entries = vfs.readdirSync(absDir, { withFileTypes: true });
+  const results: string[] = [];
+  for (const entry of entries) {
+    const e = entry as { name: string; isFile(): boolean; isDirectory(): boolean };
+    if (e.name === 'node_modules') continue;
+    const abs = absDir === '/' ? `/${e.name}` : `${absDir}/${e.name}`;
+    const rel = abs.replace(rootDir + '/', '');
+    if (e.isDirectory()) {
+      results.push(rel + '/');
+      const children = await wasmRecursiveList(vfs, abs, rootDir);
+      results.push(...children);
+    } else {
+      results.push(rel);
+    }
+  }
   return results;
 }

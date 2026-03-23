@@ -3,16 +3,26 @@
 // The asyncify variant allows synchronous JS code to call async browser APIs
 // (fetch, setTimeout, etc.) — this is the key to Node.js compat.
 
-// @ts-ignore — quickjs-emscripten types resolve at runtime
-import { newQuickJSAsyncWASMModule } from 'quickjs-emscripten';
-// @ts-ignore
-import type { QuickJSWASMModule, QuickJSAsyncContext, QuickJSAsyncRuntime, QuickJSHandle } from 'quickjs-emscripten-core';
+// Dynamic import — loaded only when WASM runtime is selected
+// This avoids Rollup resolution errors during production builds
+type QuickJSWASMModule = any;
+type QuickJSAsyncContext = any;
+type QuickJSAsyncRuntime = any;
+type QuickJSHandle = any;
 import type { VirtualFS } from '../sandbox/vfs.js';
 import { createBuiltinModules, type PolyfillContext } from '../sandbox/polyfills/index.js';
 // import { BufferPolyfill } from '../sandbox/polyfills/buffer.js';
 import * as pathModule from '../sandbox/polyfills/path.js';
 
-let moduleCache: QuickJSWASMModule | null = null;
+let moduleCache: any = null;
+
+async function loadQuickJS(): Promise<any> {
+  if (moduleCache) return moduleCache;
+  // @ts-ignore — dynamic import, resolved at runtime not build time
+  const { newQuickJSAsyncWASMModule } = await import(/* @vite-ignore */ 'quickjs-emscripten');
+  moduleCache = await newQuickJSAsyncWASMModule();
+  return moduleCache;
+}
 
 export interface WasmEngineOptions {
   vfs: VirtualFS;
@@ -49,10 +59,7 @@ export class WasmEngine {
 
   /** Initialize QuickJS async runtime. */
   async init(): Promise<void> {
-    if (!moduleCache) {
-      moduleCache = await newQuickJSAsyncWASMModule();
-    }
-    this.module = moduleCache;
+    this.module = await loadQuickJS();
     this.rt = this.module.newRuntime();
     this.rt.setMemoryLimit(256 * 1024 * 1024); // 256MB
     this.rt.setMaxStackSize(1024 * 1024); // 1MB stack

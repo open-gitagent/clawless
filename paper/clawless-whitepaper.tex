@@ -1,0 +1,609 @@
+\documentclass[11pt,twocolumn]{article}
+
+% ─── Packages ─────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{authblk}
+\usepackage{abstract}
+
+% ─── Colors ───────────────────────────────────────────────────────────────────
+\definecolor{codeblue}{HTML}{58a6ff}
+\definecolor{codegray}{HTML}{8b949e}
+\definecolor{codegreen}{HTML}{3fb950}
+\definecolor{codebg}{HTML}{161b22}
+\definecolor{accent}{HTML}{f78166}
+
+% ─── Listings ─────────────────────────────────────────────────────────────────
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{codeblue}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{codegray},
+  backgroundcolor=\color{codebg!5},
+  numbers=left,
+  numberstyle=\tiny\color{codegray},
+  numbersep=5pt,
+  tabsize=2,
+  showstringspaces=false,
+}
+
+\lstdefinelanguage{TypeScript}{
+  morekeywords={async,await,const,let,interface,type,export,import,from,
+    function,return,class,extends,implements,new,this,if,else,for,of,
+    throw,try,catch,Promise,void,string,number,boolean,null,undefined,
+    true,false,get,set,static,readonly},
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]',
+  morestring=[b]",
+  morestring=[b]`,
+  sensitive=true,
+}
+
+\lstdefinelanguage{YAML}{
+  morekeywords={true,false,null},
+  morecomment=[l]{\#},
+  morestring=[b]",
+  morestring=[b]',
+  sensitive=true,
+}
+
+% ─── Hyperref ─────────────────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=codeblue,
+  citecolor=codeblue,
+  urlcolor=accent,
+}
+
+% ─── Section formatting ──────────────────────────────────────────────────────
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+% ─── Document ─────────────────────────────────────────────────────────────────
+
+\title{
+  \textbf{ClawLess: A Browser-Native Sandboxed Runtime\\for Auditable AI Agent Execution}
+}
+
+\author[1]{Shreyas Kapale}
+\affil[1]{Lyzr AI\\ \texttt{shreyas@lyzr.ai}}
+
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+% ─── Abstract ─────────────────────────────────────────────────────────────────
+\begin{abstract}
+Autonomous AI coding agents increasingly require access to filesystems, terminals, package managers, and network APIs. Current deployment models---whether local (e.g., OpenClaw) or cloud-hosted sandboxes---expose significant attack surface: malicious skill injection, credential exfiltration, and remote code execution via exposed WebSocket endpoints. We present \textbf{ClawLess}, an open-source runtime that executes AI agents \emph{entirely within a browser tab} using WebAssembly-based containers. ClawLess provides a complete Node.js environment, policy-enforced guardrails, and a comprehensive audit trail---with zero server infrastructure and zero network-exposed endpoints. API credentials never leave the browser. We describe the architecture, the declarative policy engine, the agent-agnostic context injection protocol, and the dual-layer network interception system. ClawLess is MIT-licensed and ships as a 3-line embeddable SDK (\texttt{npm i clawcontainer}), demonstrating that meaningful AI agent capability and verifiable security are not mutually exclusive.
+\end{abstract}
+
+\textbf{Keywords:} AI agents, sandboxed execution, WebAssembly, WebContainers, audit logging, policy enforcement, browser-native runtime
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Introduction}
+\label{sec:intro}
+
+The rapid adoption of autonomous AI coding agents---systems that read files, spawn processes, make API calls, and commit code on behalf of developers---has exposed a fundamental tension between \emph{capability} and \emph{control}. Agents like OpenClaw~\cite{openclaw2026} have achieved remarkable adoption (250,000+ GitHub stars in 60 days), but this adoption has been accompanied by an equally remarkable security crisis: over 824 malicious skills discovered on ClawHub, 40,000+ publicly exposed instances vulnerable to takeover, and multiple critical CVEs including remote code execution via crafted links~\cite{clawjacked2026,thehackernews2026}.
+
+The root cause is architectural. Existing agent runtimes operate with three assumptions that create attack surface:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Server-side execution} requires infrastructure that can be discovered, probed, and compromised.
+  \item \textbf{Credential storage} on persistent filesystems creates exfiltration targets.
+  \item \textbf{Network-exposed control planes} (WebSocket, HTTP APIs) enable remote hijacking.
+\end{enumerate}
+
+We present ClawLess, a runtime that eliminates all three by moving the entire execution environment into the browser. Using WebContainers~\cite{webcontainers}---a WebAssembly-based implementation of Node.js that runs client-side---ClawLess boots a full Node.js runtime, installs npm packages, spawns agent processes, and provides filesystem and terminal access, all within a single browser tab.
+
+This paper makes three contributions:
+
+\begin{enumerate}[noitemsep]
+  \item A \textbf{browser-native architecture} for AI agent execution that provides zero-infrastructure deployment with no network-exposed attack surface (\S\ref{sec:architecture}).
+  \item A \textbf{declarative policy engine} with pre-execution enforcement and a \textbf{comprehensive audit system} with dual-layer network interception (\S\ref{sec:security}).
+  \item A \textbf{generic context injection protocol} (\texttt{\_\_CLAWLESS\_CONTEXT\_\_}) that enables agent-agnostic file attachment via stdin (\S\ref{sec:protocol}).
+\end{enumerate}
+
+ClawLess is MIT-licensed, implemented in $\sim$3,000 lines of TypeScript, and ships as an embeddable SDK.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Background and Motivation}
+\label{sec:background}
+
+\subsection{The AI Agent Security Crisis}
+
+The year 2026 has seen AI agents transition from research prototypes to mainstream developer tools. OpenClaw~\cite{openclaw2026}, the most prominent example, provides 100+ integrations across messaging platforms, smart home devices, and development tools. Its growth has been unprecedented, surpassing React's decade-long GitHub star count in under two months.
+
+However, this adoption has revealed systemic security problems:
+
+\textbf{Supply chain attacks.} The ClawHub skill marketplace accumulated 824+ malicious packages out of 10,700 total---a poisoning rate of 7.7\%. Malicious skills have been observed exfiltrating API credentials, installing backdoors, and establishing reverse shells~\cite{thehackernews2026}.
+
+\textbf{Infrastructure exposure.} A scan of the public internet revealed 40,000+ OpenClaw instances, with over 60\% vulnerable to unauthorized access. The ``ClawJacked'' vulnerability (CVE-2026-25253, CVSS 8.8) demonstrated that malicious websites could hijack local instances via WebSocket connection without authentication~\cite{clawjacked2026}.
+
+\textbf{Credential exfiltration.} Infostealers specifically targeting OpenClaw configuration files and gateway tokens have been documented in the wild, exploiting the fact that API credentials are stored on the local filesystem in predictable locations.
+
+These are not implementation bugs to be patched; they are consequences of an architectural model that places a powerful, network-connected execution engine on the developer's machine with broad filesystem access and stored credentials.
+
+\subsection{Existing Approaches}
+
+Several approaches have been proposed to mitigate agent execution risks:
+
+\textbf{Docker sandboxing.} Wrapping agent execution in containers (as OpenClaw itself does for certain operations) limits filesystem access but does not address credential storage or network exposure. The container must still run on infrastructure that can be discovered.
+
+\textbf{Cloud-hosted sandboxes.} Services like E2B and CodeSandbox provide isolated environments but require trusting a third party with source code and API credentials. Latency is non-trivial, and the environments are not embeddable in arbitrary web applications.
+
+\textbf{Permission systems.} Fine-grained permission models (as in Claude Code and similar tools) help but operate as \emph{post-hoc} gates rather than architectural boundaries. The underlying execution environment still has broad capability that can be exploited if the permission layer is bypassed.
+
+ClawLess takes a different approach: rather than adding security layers \emph{on top of} a powerful execution environment, it places the execution environment inside the browser's existing security boundary.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Architecture}
+\label{sec:architecture}
+
+\subsection{Design Principles}
+
+ClawLess is guided by five design principles:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Zero infrastructure.} No server, no Docker, no cloud VM. The entire runtime exists in the browser tab.
+  \item \textbf{Credentials stay local.} API keys are held in browser memory and injected into the container environment at runtime. They are never written to persistent storage accessible to external processes.
+  \item \textbf{Pre-execution enforcement.} Policy checks occur \emph{before} operations are dispatched to the WebContainer, not as after-the-fact logging.
+  \item \textbf{Complete observability.} Every file read/write, process spawn/exit, network request/response, and policy decision is recorded.
+  \item \textbf{Agent agnosticism.} The runtime does not prescribe a specific agent; any process that reads stdin and writes stdout can be launched.
+\end{enumerate}
+
+\subsection{System Overview}
+
+Figure~\ref{fig:arch} illustrates the component architecture. The system consists of seven managers coordinated by the \texttt{ClawContainer} facade:
+
+\begin{figure}[H]
+\centering
+\small
+\begin{verbatim}
+┌─────────────────────────────────────────┐
+│              Browser Tab                │
+│                                         │
+│  ┌──────────────────────────────────┐   │
+│  │        ClawContainer (SDK)       │   │
+│  │  ┌──────┐ ┌──────┐ ┌─────────┐  │   │
+│  │  │UIManager│Terminal│ TabManager│  │   │
+│  │  └──────┘ └──────┘ └─────────┘  │   │
+│  │  ┌─────────┐ ┌──────┐ ┌──────┐  │   │
+│  │  │PolicyEngine│AuditLog│Plugins│  │   │
+│  │  └─────────┘ └──────┘ └──────┘  │   │
+│  │  ┌──────────────────────────────┐│   │
+│  │  │     ContainerManager         ││   │
+│  │  │  ┌────────────────────────┐  ││   │
+│  │  │  │   WebContainer (WASM)  │  ││   │
+│  │  │  │  ┌──────┐ ┌─────────┐ │  ││   │
+│  │  │  │  │Node.js│ │npm/fs/  │ │  ││   │
+│  │  │  │  │Runtime│ │terminal │ │  ││   │
+│  │  │  │  └──────┘ └─────────┘ │  ││   │
+│  │  │  │  ┌──────────────────┐ │  ││   │
+│  │  │  │  │  Agent Process   │ │  ││   │
+│  │  │  │  │  (gitclaw/custom)│ │  ││   │
+│  │  │  │  └──────────────────┘ │  ││   │
+│  │  │  └────────────────────────┘  ││   │
+│  │  └──────────────────────────────┘│   │
+│  └──────────────────────────────────┘   │
+└─────────────────────────────────────────┘
+          No network endpoints exposed
+\end{verbatim}
+\caption{ClawLess component architecture. The entire runtime, including the Node.js environment and agent process, executes within the browser tab's security boundary.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Boot Sequence}
+
+The boot sequence proceeds through five stages:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{WebContainer boot.} The WASM-based Node.js runtime is initialized and workspace files are mounted (package.json, network hooks, default workspace).
+  \item \textbf{Dependency installation.} \texttt{npm install} runs inside the container with \texttt{--legacy-peer-deps} and \texttt{--ignore-scripts} flags.
+  \item \textbf{Startup script.} An optional user-provided shell script executes (e.g., database seeding, environment setup).
+  \item \textbf{Environment injection.} API keys from browser memory are written to the container's \texttt{.env} file and the agent configuration is patched.
+  \item \textbf{Agent launch.} The agent process is spawned with a PTY, connected to the terminal, and output is routed through the audit pipeline.
+\end{enumerate}
+
+Each stage is guarded by the policy engine and logged to the audit trail.
+
+\subsection{Component Design}
+
+\subsubsection{ContainerManager}
+
+The \texttt{ContainerManager} wraps the WebContainer API and enforces policy on every operation. It maintains the active process count, manages the agent's stdin writer, and processes output through a line-buffered pipeline that strips network audit markers before forwarding clean output to the terminal.
+
+Key invariant: no filesystem or process operation bypasses \texttt{enforcePolicy()}. If the policy engine is not configured, enforcement is a no-op (permissive default); if configured, every operation is checked before dispatch.
+
+\subsubsection{TypedEventEmitter}
+
+A 29-line generic event system provides compile-time type safety for all SDK events. The event map is defined as:
+
+\begin{lstlisting}[language=TypeScript]
+type ClawContainerEvents = {
+  ready: [];
+  error: [error: Error];
+  status: [status: string];
+  'file.change': [path: string];
+  'file.upload': [path: string, size: number];
+  'context.inject': [name: string];
+  'process.exit': [code: number];
+  'server.ready': [port: number, url: string];
+  log: [entry: AuditEntry];
+};
+\end{lstlisting}
+
+\subsubsection{Plugin System}
+
+Plugins contribute npm dependencies, workspace files, environment variables, and custom UI tabs. The lifecycle consists of three hooks: \texttt{onInit} (before boot), \texttt{onReady} (after agent launch), and \texttt{onDestroy} (on teardown). Plugin contributions are merged with user options, with user values taking precedence.
+
+\subsubsection{Template System}
+
+Container configurations can be defined as named templates in YAML or TypeScript. A hand-rolled YAML parser (272 lines, zero dependencies) supports scalars, nested blocks, records, and block scalars. Templates are resolved and merged with runtime options before boot.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Security Model}
+\label{sec:security}
+
+\subsection{Threat Model}
+
+ClawLess considers three threat categories:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Agent misbehavior.} The agent attempts to read sensitive files, spawn excessive processes, or exfiltrate data via network requests.
+  \item \textbf{External attack.} An adversary attempts to discover, probe, or hijack the agent runtime.
+  \item \textbf{Credential leakage.} API keys are exposed through logs, filesystem artifacts, or network traffic.
+\end{enumerate}
+
+\subsection{Defense Layers}
+
+\subsubsection{Layer 1: Browser Sandbox}
+
+The WebContainer runs inside the browser's WASM sandbox. There is no server-side component, no listening port, and no WebSocket endpoint. The ClawJacked class of vulnerabilities (malicious websites hijacking local agent instances via WebSocket) is architecturally impossible---there is nothing to connect to.
+
+\subsubsection{Layer 2: Policy Engine}
+
+The policy engine provides declarative, pre-execution guardrails specified in YAML:
+
+\begin{lstlisting}[language=YAML]
+version: "1"
+mode: allow-all
+files:
+  write:
+    - pattern: "workspace/**"
+      allow: true
+    - pattern: "**"
+      allow: false
+limits:
+  maxFileSize: 10485760
+  maxProcesses: 5
+\end{lstlisting}
+
+The engine supports glob pattern matching (hand-rolled, supporting \texttt{**}, \texttt{*}, and \texttt{?}), file size limits, process count caps, port binding restrictions, and tool-specific allow/deny rules.
+
+Critically, enforcement occurs \emph{before} the operation is dispatched:
+
+\begin{lstlisting}[language=TypeScript]
+async writeFile(path, contents) {
+  this.enforcePolicy('file.write', path,
+    { size: contents.length });
+  // Only reached if policy allows:
+  await this.wc.fs.writeFile(path, contents);
+}
+\end{lstlisting}
+
+If enforcement fails, a \texttt{PolicyDeniedError} is thrown, the denial is logged, and the operation never executes.
+
+\subsubsection{Layer 3: Comprehensive Audit Trail}
+
+Every operation produces an audit entry with timestamp, event type, detail, metadata, source classification, and severity level. The audit system defines 18 event types across six source categories (Table~\ref{tab:audit}).
+
+\begin{table}[H]
+\centering
+\caption{Audit event taxonomy.}
+\label{tab:audit}
+\scriptsize
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Category} & \textbf{Events} & \textbf{Source} \\
+\midrule
+Process & spawn, exit & boot/agent/user \\
+File I/O & read, write, upload & user/system \\
+Terminal & io.stdout, io.stdin & agent \\
+Network & net.request, net.response & agent/browser \\
+Environment & env.configure & user \\
+Infrastructure & server.ready, boot.mount & system/boot \\
+Policy & policy.deny, policy.load & policy/user \\
+Git & git.clone, git.push & user \\
+Context & context.inject & user \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Layer 4: Dual-Layer Network Interception}
+
+Network requests are intercepted at two levels:
+
+\textbf{Container-side.} A Node.js require hook (\texttt{network-hook.cjs}) is injected via \texttt{NODE\_OPTIONS=--require ./network-hook.cjs}. It monkey-patches \texttt{http.request()}, \texttt{https.request()}, and \texttt{globalThis.fetch()} to emit structured audit markers on stderr:
+
+\begin{lstlisting}
+__NET_AUDIT__:{"type":"request",
+  "url":"https://api.openai.com/v1/...",
+  "method":"POST",
+  "headers":{"Authorization":"sk-abc12...xyzw"}}
+\end{lstlisting}
+
+The \texttt{ContainerManager} strips these markers from the output stream, parses the JSON, and logs them as \texttt{net.request}/\texttt{net.response} audit entries. Clean output (without markers) is forwarded to the terminal.
+
+\textbf{Browser-side.} A fetch interceptor patches \texttt{window.fetch} to log requests made by the host page itself (e.g., Browserbase API calls, GitHub API calls for repo cloning).
+
+\subsubsection{Layer 5: Credential Masking}
+
+Sensitive values are masked throughout the audit trail:
+
+\begin{itemize}[noitemsep]
+  \item API keys show first 7 + last 4 characters: \texttt{sk-proj...k4Qw}
+  \item Headers matching \texttt{authorization}, \texttt{x-api-key}, \texttt{api-key}, or containing \texttt{secret}/\texttt{token} are automatically masked.
+  \item Request/response bodies are truncated to 4,000 characters.
+  \item I/O buffers are capped at 2,000 characters per flush.
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Context Injection Protocol}
+\label{sec:protocol}
+
+\subsection{Motivation}
+
+Existing agent platforms tightly couple file context delivery to their specific agent implementation. ClawLess requires a protocol that any agent (or no agent) can consume.
+
+\subsection{Protocol Specification}
+
+The \texttt{\_\_CLAWLESS\_CONTEXT\_\_} protocol uses line-oriented markers written to the agent's stdin:
+
+\begin{lstlisting}
+__CLAWLESS_CONTEXT_START__
+{"type":"file","name":"readme.md","size":1234}
+<file contents verbatim>
+__CLAWLESS_CONTEXT_END__
+\end{lstlisting}
+
+\textbf{Design decisions:}
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Plain text, no base64.} Agents that don't implement the protocol still see readable text. An agent can ignore the markers and the user's file content remains visible in the terminal.
+  \item \textbf{Text-only.} Binary files are rejected at the SDK level. This avoids terminal corruption and ensures content is always inspectable in the audit log.
+  \item \textbf{Size cap: 512\,KB.} Prevents accidental injection of large files that could overwhelm the agent's context window or stdin buffer.
+  \item \textbf{JSON metadata line.} Extensible---future versions can add MIME type, encoding, or chunking fields without breaking the envelope format.
+\end{itemize}
+
+\subsection{Delivery Mechanisms}
+
+Context injection is exposed through four UI surfaces:
+
+\begin{enumerate}[noitemsep]
+  \item \textbf{Attach button} in the terminal toolbar (paperclip icon).
+  \item \textbf{Drag-and-drop} onto the terminal panel.
+  \item \textbf{Right-click context menu} on file tree items (``Send to Agent'').
+  \item \textbf{SDK API:} \texttt{cc.sendContext(\{type:'file', name, content\})}.
+\end{enumerate}
+
+File upload to the workspace (distinct from context injection) is provided via an upload button, drag-and-drop on the file tree, and \texttt{cc.fs.upload()}.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{SDK and Embeddability}
+\label{sec:sdk}
+
+ClawLess is designed for embedding in arbitrary web applications. The minimal integration is three lines:
+
+\begin{lstlisting}[language=TypeScript]
+import { ClawContainer } from 'clawcontainer';
+const cc = new ClawContainer('#app');
+await cc.start();
+\end{lstlisting}
+
+The SDK exposes a typed interface (\texttt{ClawContainerSDK}) covering:
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Lifecycle:} \texttt{start()}, \texttt{stop()}, \texttt{restart()}
+  \item \textbf{Execution:} \texttt{exec(cmd)}, \texttt{shell()}, \texttt{sendInput(data)}
+  \item \textbf{Filesystem:} read, write, writeBytes, list, mkdir, remove, grep, upload
+  \item \textbf{Context:} \texttt{sendContext(payload)}
+  \item \textbf{Git:} clone, push, checkVisibility
+  \item \textbf{Archive:} zip export/import
+  \item \textbf{Observability:} \texttt{logs(filter?)}, typed events
+  \item \textbf{Extensibility:} \texttt{use(plugin)}, \texttt{addTab(def)}
+\end{itemize}
+
+Custom agents are supported via the \texttt{AgentConfig} interface:
+
+\begin{lstlisting}[language=TypeScript]
+const cc = new ClawContainer('#app', {
+  agent: {
+    package: 'my-agent',
+    entry: 'dist/index.js',
+    args: ['--dir', '<home>/workspace'],
+  },
+});
+\end{lstlisting}
+
+The placeholder \texttt{<home>} is resolved at runtime to the container's home directory.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Implementation}
+\label{sec:implementation}
+
+\subsection{Codebase Statistics}
+
+Table~\ref{tab:loc} summarizes the implementation.
+
+\begin{table}[H]
+\centering
+\caption{Source code breakdown by component.}
+\label{tab:loc}
+\scriptsize
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Component} & \textbf{Lines} & \textbf{Dependencies} \\
+\midrule
+Container Manager & 743 & WebContainer API \\
+UI Manager & 600+ & Monaco, xterm.js \\
+SDK Facade & 452 & All internal \\
+Policy Engine & 404 & None (hand-rolled) \\
+Template System & 272 & None (hand-rolled YAML) \\
+Network Hook & 248 & None (injected CJS) \\
+Git Service & 229 & fetch API \\
+Audit Log & 199 & None \\
+Types & 133 & None \\
+Monaco Editor & 112 & monaco-editor \\
+Workspace Defaults & 108 & None \\
+Terminal Manager & 79 & xterm.js \\
+Browser Net Intercept & 75 & Audit Log \\
+Plugin Manager & 64 & None \\
+Tab Manager & 31 & None \\
+Event Emitter & 29 & None \\
+\midrule
+\textbf{Total} & $\sim$\textbf{3,000} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Technology Stack}
+
+\begin{itemize}[noitemsep]
+  \item \textbf{Runtime:} WebContainer API (StackBlitz) --- WASM-based Node.js
+  \item \textbf{Language:} TypeScript 5.4, ES2022 target
+  \item \textbf{Build:} Vite 5.2 with Monaco editor plugin
+  \item \textbf{Editor:} Monaco Editor (VS Code engine)
+  \item \textbf{Terminal:} xterm.js 5.5 with fit addon
+  \item \textbf{Archive:} JSZip 3.10
+  \item \textbf{Git:} GitHub REST API (no git binary required)
+\end{itemize}
+
+\subsection{Zero-Dependency Components}
+
+The policy engine, template parser, event emitter, and glob matcher are implemented without external dependencies. This reduces supply chain risk (particularly relevant given the ClawHub malicious package epidemic) and keeps the bundle size minimal.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Limitations and Tradeoffs}
+\label{sec:limitations}
+
+ClawLess makes deliberate tradeoffs:
+
+\textbf{WebContainer constraints.} The WASM runtime does not support native addons (\texttt{node-gyp}), multi-threading, or raw TCP sockets. Packages requiring native compilation (e.g., \texttt{bcrypt}, \texttt{sharp}) will not install. This limits the range of agent toolkits that can run unmodified.
+
+\textbf{Performance.} npm install runs 2--5$\times$ slower than native. Filesystem operations incur WASM boundary overhead. For latency-sensitive workloads, a server-side sandbox may be preferable.
+
+\textbf{No persistent state.} The container is ephemeral---closing the tab destroys the environment. Workspace persistence requires explicit zip export or GitHub push.
+
+\textbf{Single-tab isolation.} While the WASM sandbox provides strong isolation from the host system, multiple ClawLess instances in the same browser share the browser's memory and CPU. Resource exhaustion in one tab can affect others.
+
+\textbf{Platform integrations.} ClawLess does not provide the 100+ platform integrations (Telegram, WhatsApp, smart home) available in OpenClaw. It is scoped to coding agent use cases where the primary interaction is file editing, terminal, and API access.
+
+\textbf{Context protocol limitations.} The \texttt{\_\_CLAWLESS\_CONTEXT\_\_} protocol is text-only and caps at 512\,KB. Binary file context injection is not supported. Agents must opt-in to parsing the protocol; graceful degradation (showing raw text) is a design feature, not a guarantee of functionality.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Comparison with Related Work}
+\label{sec:related}
+
+\begin{table}[H]
+\centering
+\caption{Comparison of AI agent execution environments.}
+\label{tab:comparison}
+\scriptsize
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+& \rotatebox{60}{\textbf{ClawLess}} & \rotatebox{60}{\textbf{OpenClaw}} & \rotatebox{60}{\textbf{E2B}} & \rotatebox{60}{\textbf{Claude Code}} & \rotatebox{60}{\textbf{GitClaw}} \\
+\midrule
+No server needed       & \checkmark & $\times$ & $\times$ & $\times$ & \checkmark \\
+No exposed endpoints   & \checkmark & $\times$ & $\times$ & N/A      & \checkmark \\
+Browser-native         & \checkmark & $\times$ & $\times$ & $\times$ & $\times$ \\
+Full audit trail       & \checkmark & Partial  & $\times$ & Partial  & \checkmark \\
+Pre-exec policy engine & \checkmark & $\times$ & $\times$ & \checkmark & $\times$ \\
+Embeddable SDK         & \checkmark & $\times$ & \checkmark & $\times$ & $\times$ \\
+Agent agnostic         & \checkmark & $\times$ & \checkmark & $\times$ & $\times$ \\
+Native addon support   & $\times$   & \checkmark & \checkmark & \checkmark & \checkmark \\
+Platform integrations  & $\times$   & \checkmark & $\times$ & $\times$ & $\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Future Work}
+\label{sec:future}
+
+\textbf{Multi-agent orchestration.} Supporting multiple agent processes in a single container, with isolated stdin/stdout channels and per-agent policy scoping.
+
+\textbf{Persistent workspaces.} Browser-native persistence via IndexedDB or the File System Access API, enabling workspace survival across tab reloads.
+
+\textbf{Policy language extensions.} Rate limiting, network domain allowlists, and token budget enforcement (preventing runaway API spend).
+
+\textbf{Agent protocol standardization.} Contributing the \texttt{\_\_CLAWLESS\_CONTEXT\_\_} protocol to emerging AI agent interoperability standards (e.g., the GitAgent specification).
+
+\textbf{Collaborative execution.} WebRTC-based sharing of container state between users, enabling pair programming with AI agents.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+\label{sec:conclusion}
+
+The AI agent security crisis is not a bug to be patched; it is a consequence of placing powerful execution engines on network-accessible infrastructure with persistent credential storage. ClawLess demonstrates that an alternative architecture is viable: by moving the entire runtime into the browser's WASM sandbox, we eliminate the attack surface that enables credential exfiltration, remote hijacking, and malicious skill injection---while retaining the core capabilities that make AI coding agents useful.
+
+The system is not a replacement for server-side agents in all contexts. It is a demonstration that for a large class of coding agent use cases, meaningful capability and verifiable security are not mutually exclusive. The source code is available at \url{https://github.com/open-gitagent/clawless} under the MIT license.
+
+% ═══════════════════════════════════════════════════════════════════════════════
+\begin{thebibliography}{9}
+
+\bibitem{openclaw2026}
+P.~Steinberger, ``OpenClaw: Open-Source AI Agent,'' 2026.
+\url{https://github.com/openclaw/openclaw}.
+
+\bibitem{clawjacked2026}
+R.~Aboukhalil, ``ClawJacked: Malicious Websites Can Hijack Your Local AI Agent,'' The Hacker News, February 2026.
+
+\bibitem{thehackernews2026}
+The Hacker News, ``OpenClaw AI Agent Flaws Could Enable Credential Theft, Code Execution,'' March 2026.
+
+\bibitem{webcontainers}
+StackBlitz, ``WebContainers: Run Node.js Natively in the Browser,'' 2024.
+\url{https://webcontainers.io}.
+
+\bibitem{gitagent2026}
+GitAgent, ``GitAgent Standard: Agent-Native Git Protocol,'' 2026.
+\url{https://gitagent.sh}.
+
+\bibitem{openclaw_wiki}
+Wikipedia, ``OpenClaw,'' 2026.
+\url{https://en.wikipedia.org/wiki/OpenClaw}.
+
+\bibitem{e2b2024}
+E2B, ``Cloud Runtime for AI Agents,'' 2024.
+\url{https://e2b.dev}.
+
+\bibitem{monaco2024}
+Microsoft, ``Monaco Editor,'' 2024.
+\url{https://microsoft.github.io/monaco-editor/}.
+
+\bibitem{xtermjs2024}
+xterm.js Contributors, ``xterm.js: A Terminal for the Web,'' 2024.
+\url{https://xtermjs.org}.
+
+\end{thebibliography}
+
+\end{document}

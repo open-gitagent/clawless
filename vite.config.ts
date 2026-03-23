@@ -44,9 +44,20 @@ export default defineConfig(({ mode }) => {
         }
       : {
           target: 'esnext',
+          rollupOptions: {
+            external: ['quickjs-emscripten'],
+          },
         },
     optimizeDeps: {
-      exclude: ['@webcontainer/api'],
+      exclude: [
+        '@webcontainer/api',
+        'quickjs-emscripten',
+        'quickjs-emscripten-core',
+        '@jitl/quickjs-wasmfile-release-sync',
+        '@jitl/quickjs-wasmfile-release-asyncify',
+        '@jitl/quickjs-wasmfile-debug-asyncify',
+      ],
     },
+    assetsInclude: ['**/*.wasm'],
   };
 });

@@ -34,7 +34,14 @@ async function boot() {
   if (status) status.style.display = '';
   if (progressBar) progressBar.style.display = '';
 
-  const cc = new ClawContainer('#app', { template });
+  // Detect WASM runtime selection
+  const useWasm = template === 'gitclaw-wasm';
+  const actualTemplate = useWasm ? 'gitclaw' : template;
+
+  const cc = new ClawContainer('#app', {
+    template: actualTemplate,
+    runtime: useWasm ? 'wasm' : undefined,
+  });
   cc.start().catch(console.error);
 
   // Expose SDK globally for console access and external scripts

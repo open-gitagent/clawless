@@ -157,8 +157,10 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     const resolvedAgent = opts.agent !== false ? opts.agent as AgentConfig | undefined : undefined;
 
     // Step 1: Boot
-    this._terminal.write('\x1b[90m[ClawLess] Booting WebContainer…\x1b[0m\r\n');
-    this._audit.log('status.change', 'boot sequence started', undefined, { source: 'boot' });
+    const runtimeName = this._options.runtime ?? 'webcontainer';
+    const isWasm = runtimeName === 'wasm';
+    this._terminal.write(`\x1b[90m[ClawLess] Booting ${isWasm ? 'ClawWASM' : 'WebContainer'}…\x1b[0m\r\n`);
+    this._audit.log('status.change', 'boot sequence started', { runtime: runtimeName }, { source: 'boot' });
 
     try {
       await this._container.boot({
@@ -167,8 +169,9 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
         agentPackage: resolvedAgent?.package,
         agentVersion: resolvedAgent?.version,
         agentOverrides: resolvedAgent?.overrides,
+        runtime: runtimeName,
       });
-      this._audit.log('status.change', 'webcontainer booted', undefined, { source: 'boot' });
+      this._audit.log('status.change', `${runtimeName} booted`, undefined, { source: 'boot' });
     } catch (e) {
       this._terminal.write(`\r\n\x1b[31m[ClawLess] Boot failed: ${(e as Error).message}\x1b[0m\r\n`);
       this.emit('error', e as Error);
