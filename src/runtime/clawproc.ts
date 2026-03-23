@@ -273,12 +273,37 @@ export class ClawProc {
     const w = (s: string) => outputWriter.write(s);
     const chatHistory: Array<{ role: string; content: string }> = [];
 
-    await w('\r\n\x1b[1mClawKernel Agent v1.0.0\x1b[0m\r\n');
-    await w('\x1b[90mRuntime: ClawKernel (WASM) — zero WebContainers\x1b[0m\r\n');
-    await w('\x1b[90mWorkspace: /workspace\x1b[0m\r\n\r\n');
-    await w('Commands: \x1b[33mls\x1b[0m, \x1b[33mcat <file>\x1b[0m, \x1b[33mwrite <file> <content>\x1b[0m, \x1b[33mmkdir <dir>\x1b[0m, \x1b[33mhelp\x1b[0m, \x1b[33mquit\x1b[0m\r\n');
-    await w('Or type any message to chat.\r\n\r\n');
-    await w('\x1b[32m> \x1b[0m');
+    // Read agent config from workspace template
+    let agentName = 'my-agent';
+    let agentVersion = '1.0.0';
+    let model = '';
+    let tools = 'cli, read, write, memory';
+    try {
+      const yaml = await this.fs.readFile('/workspace/agent.yaml', 'utf-8');
+      const nameMatch = yaml.match(/name:\s*(.+)/);
+      const versionMatch = yaml.match(/version:\s*(.+)/);
+      const modelMatch = yaml.match(/preferred:\s*"?([^"\n]*)"?/);
+      const toolsMatch = yaml.match(/tools:\s*\[([^\]]*)\]/);
+      if (nameMatch) agentName = nameMatch[1].trim();
+      if (versionMatch) agentVersion = versionMatch[1].trim();
+      if (modelMatch && modelMatch[1]) model = modelMatch[1].trim();
+      if (toolsMatch) tools = toolsMatch[1].trim();
+    } catch { /* no agent.yaml */ }
+
+    // Detect configured model from env
+    if (!model) {
+      if (env['ANTHROPIC_API_KEY']) model = 'anthropic:claude-sonnet-4-6';
+      else if (env['OPENAI_API_KEY']) model = 'openai:gpt-4o';
+      else if (env['GOOGLE_API_KEY']) model = 'google:gemini-2.0-flash';
+    }
+
+    await w('\r\n');
+    await w(`\x1b[1m${agentName} v${agentVersion}\x1b[0m\r\n`);
+    await w(`Model: \x1b[36m${model || '(not configured)'}\x1b[0m\r\n`);
+    await w(`Tools: \x1b[90m${tools}\x1b[0m\r\n`);
+    await w(`Runtime: \x1b[90mClawKernel (WASM) — zero WebContainers\x1b[0m\r\n\r\n`);
+    await w('Type \x1b[33m/help\x1b[0m for commands, or type a message to chat.\r\n\r\n');
+    await w('\x1b[32m→ \x1b[0m');
 
     let buffer = '';
 
@@ -292,29 +317,53 @@ export class ClawProc {
           const cmd = buffer.trim();
           buffer = '';
 
-          if (!cmd) { await w('\x1b[32m> \x1b[0m'); continue; }
+          if (!cmd) { await w('\x1b[32m→ \x1b[0m'); continue; }
 
           if (cmd === 'quit' || cmd === 'exit' || cmd === '/quit') {
             await w('\x1b[90mGoodbye.\x1b[0m\r\n');
             return 0;
           }
 
-          if (cmd === 'help') {
-            await w('\x1b[1mAvailable commands:\x1b[0m\r\n');
+          if (cmd === 'help' || cmd === '/help') {
+            await w('\x1b[1mCommands:\x1b[0m\r\n');
             await w('  \x1b[33mls [dir]\x1b[0m          — list files\r\n');
             await w('  \x1b[33mcat <file>\x1b[0m        — show file contents\r\n');
             await w('  \x1b[33mwrite <f> <text>\x1b[0m  — write text to file\r\n');
             await w('  \x1b[33mmkdir <dir>\x1b[0m       — create directory\r\n');
             await w('  \x1b[33mrm <path>\x1b[0m         — delete file/dir\r\n');
             await w('  \x1b[33mpwd\x1b[0m               — print working directory\r\n');
-            await w('  \x1b[33mquit\x1b[0m              — exit agent\r\n');
-            await w('\x1b[32m> \x1b[0m');
+            await w('  \x1b[33m/skills\x1b[0m           — list available skills\r\n');
+            await w('  \x1b[33m/memory\x1b[0m           — view memory\r\n');
+            await w('  \x1b[33m/quit\x1b[0m             — exit agent\r\n');
+            await w('\r\nOr just type a message to chat with the AI.\r\n');
+            await w('\x1b[32m→ \x1b[0m');
+            continue;
+          }
+
+          if (cmd === '/skills') {
+            await w('\x1b[1mAvailable skills:\x1b[0m\r\n');
+            await w('  \x1b[36mcli\x1b[0m      — execute shell commands\r\n');
+            await w('  \x1b[36mread\x1b[0m     — read files from workspace\r\n');
+            await w('  \x1b[36mwrite\x1b[0m    — write/create files\r\n');
+            await w('  \x1b[36mmemory\x1b[0m   — persistent memory across sessions\r\n');
+            await w('\x1b[32m→ \x1b[0m');
+            continue;
+          }
+
+          if (cmd === '/memory') {
+            try {
+              const mem = await this.fs.readFile('/workspace/memory/MEMORY.md', 'utf-8');
+              await w(`\x1b[1mMemory:\x1b[0m\r\n${mem.replace(/\n/g, '\r\n')}\r\n`);
+            } catch {
+              await w('\x1b[90mNo memories saved yet.\x1b[0m\r\n');
+            }
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
           if (cmd === 'pwd') {
             await w('/workspace\r\n');
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -336,7 +385,7 @@ export class ClawProc {
             } catch {
               await w(`\x1b[31mNo such directory: ${dir}\x1b[0m\r\n`);
             }
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -350,7 +399,7 @@ export class ClawProc {
             } catch {
               await w(`\x1b[31mNo such file: ${file}\x1b[0m\r\n`);
             }
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -370,7 +419,7 @@ export class ClawProc {
                 await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
               }
             }
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -383,7 +432,7 @@ export class ClawProc {
             } catch (e) {
               await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
             }
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -396,7 +445,7 @@ export class ClawProc {
             } catch (e) {
               await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
             }
-            await w('\x1b[32m> \x1b[0m');
+            await w('\x1b[32m→ \x1b[0m');
             continue;
           }
 
@@ -429,30 +478,44 @@ export class ClawProc {
     const openaiKey = env['OPENAI_API_KEY'];
     const googleKey = env['GOOGLE_API_KEY'];
 
+    // Build system prompt with workspace context
+    let soulContent = '';
+    try { soulContent = await this.fs.readFile('/workspace/SOUL.md', 'utf-8'); } catch { /* ok */ }
+    let rulesContent = '';
+    try { rulesContent = await this.fs.readFile('/workspace/RULES.md', 'utf-8'); } catch { /* ok */ }
+
+    const systemPrompt = [
+      soulContent || 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime.',
+      rulesContent ? `\n${rulesContent}` : '',
+      '\nYou can ask the user to run commands like `ls`, `cat <file>`, `write <file> <content>` to interact with the workspace.',
+      '\nBe concise and helpful.',
+    ].join('');
+
     history.push({ role: 'user', content: message });
 
     try {
       if (anthropicKey) {
-        await this.chatAnthropic(anthropicKey, history, w);
+        await this.chatAnthropic(anthropicKey, history, w, systemPrompt);
       } else if (openaiKey) {
-        await this.chatOpenAI(openaiKey, history, w);
+        await this.chatOpenAI(openaiKey, history, w, systemPrompt);
       } else if (googleKey) {
-        await this.chatGoogle(googleKey, history, w);
+        await this.chatGoogle(googleKey, history, w, systemPrompt);
       } else {
         await w('\x1b[31mNo API key found. Configure in the sidebar (Anthropic, OpenAI, or Google).\x1b[0m\r\n');
-        await w('\x1b[32m> \x1b[0m');
+        await w('\x1b[32m→ \x1b[0m');
         return;
       }
     } catch (e) {
       await w(`\x1b[31mAPI error: ${(e as Error).message}\x1b[0m\r\n`);
     }
-    await w('\x1b[32m> \x1b[0m');
+    await w('\x1b[32m→ \x1b[0m');
   }
 
   private async chatAnthropic(
     key: string,
     history: Array<{ role: string; content: string }>,
     w: (s: string) => Promise<void>,
+    systemPrompt: string,
   ): Promise<void> {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -464,8 +527,8 @@ export class ClawProc {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        system: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.',
+        max_tokens: 4096,
+        system: systemPrompt,
         messages: history,
       }),
     });
@@ -483,9 +546,10 @@ export class ClawProc {
     key: string,
     history: Array<{ role: string; content: string }>,
     w: (s: string) => Promise<void>,
+    systemPrompt: string,
   ): Promise<void> {
     const messages = [
-      { role: 'system', content: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.' },
+      { role: 'system', content: systemPrompt },
       ...history,
     ];
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -510,6 +574,7 @@ export class ClawProc {
     key: string,
     history: Array<{ role: string; content: string }>,
     w: (s: string) => Promise<void>,
+    systemPrompt: string,
   ): Promise<void> {
     const contents = history.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -522,7 +587,7 @@ export class ClawProc {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents,
-          systemInstruction: { parts: [{ text: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.' }] },
+          systemInstruction: { parts: [{ text: systemPrompt }] },
         }),
       },
     );
