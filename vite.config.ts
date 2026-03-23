@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
     ],
     server: {
       headers: {
-        'Cross-Origin-Embedder-Policy': 'require-corp',
+        'Cross-Origin-Embedder-Policy': 'credentialless',
         'Cross-Origin-Opener-Policy': 'same-origin',
       },
       proxy: {
@@ -46,7 +46,14 @@ export default defineConfig(({ mode }) => {
           target: 'esnext',
         },
     optimizeDeps: {
-      exclude: ['@webcontainer/api'],
+      exclude: [
+        '@webcontainer/api',
+        'quickjs-emscripten',
+        'quickjs-emscripten-core',
+        '@jitl/quickjs-wasmfile-release-sync',
+        '@jitl/quickjs-wasmfile-release-asyncify',
+      ],
     },
+    assetsInclude: ['**/*.wasm'],
   };
 });

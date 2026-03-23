@@ -2,7 +2,7 @@
 // Runs JS code inside QuickJS-WASM with Node.js API shims wired to ClawKernel
 // subsystems (ClawFS for fs, ClawNet for fetch, etc.)
 
-import { newQuickJSWASMModule } from 'quickjs-emscripten';
+import { getQuickJS } from 'quickjs-emscripten';
 import type { QuickJSWASMModule, QuickJSContext } from 'quickjs-emscripten';
 import type { ClawFS } from './clawfs.js';
 
@@ -21,7 +21,7 @@ let moduleCache: QuickJSWASMModule | null = null;
 
 async function getModule(): Promise<QuickJSWASMModule> {
   if (!moduleCache) {
-    moduleCache = await newQuickJSWASMModule();
+    moduleCache = await getQuickJS();
   }
   return moduleCache;
 }
