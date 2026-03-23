@@ -267,9 +267,11 @@ export class ClawProc {
   private async runBuiltinAgent(
     inputReader: ReadableStreamDefaultReader<string>,
     outputWriter: WritableStreamDefaultWriter<string>,
-    _opts?: SpawnOptions,
+    opts?: SpawnOptions,
   ): Promise<number> {
+    const env = opts?.env ?? {};
     const w = (s: string) => outputWriter.write(s);
+    const chatHistory: Array<{ role: string; content: string }> = [];
 
     await w('\r\n\x1b[1mClawKernel Agent v1.0.0\x1b[0m\r\n');
     await w('\x1b[90mRuntime: ClawKernel (WASM) — zero WebContainers\x1b[0m\r\n');
@@ -398,10 +400,8 @@ export class ClawProc {
             continue;
           }
 
-          // Unknown command — echo it back as a chat message
-          await w(`\x1b[90mYou said: ${cmd}\x1b[0m\r\n`);
-          await w('\x1b[90m(AI chat requires an API key — configure in sidebar)\x1b[0m\r\n');
-          await w('\x1b[32m> \x1b[0m');
+          // Chat — send to LLM via ClawNet
+          await this.handleChat(cmd, chatHistory, env, w);
 
         } else if (char === '\x7f' || char === '\b') {
           if (buffer.length > 0) {
@@ -415,6 +415,125 @@ export class ClawProc {
       }
     }
     return 0;
+  }
+
+  /** Send a chat message to the configured LLM. */
+  private async handleChat(
+    message: string,
+    history: Array<{ role: string; content: string }>,
+    env: Record<string, string>,
+    w: (s: string) => Promise<void>,
+  ): Promise<void> {
+    // Detect provider from env vars
+    const anthropicKey = env['ANTHROPIC_API_KEY'];
+    const openaiKey = env['OPENAI_API_KEY'];
+    const googleKey = env['GOOGLE_API_KEY'];
+
+    history.push({ role: 'user', content: message });
+
+    try {
+      if (anthropicKey) {
+        await this.chatAnthropic(anthropicKey, history, w);
+      } else if (openaiKey) {
+        await this.chatOpenAI(openaiKey, history, w);
+      } else if (googleKey) {
+        await this.chatGoogle(googleKey, history, w);
+      } else {
+        await w('\x1b[31mNo API key found. Configure in the sidebar (Anthropic, OpenAI, or Google).\x1b[0m\r\n');
+        await w('\x1b[32m> \x1b[0m');
+        return;
+      }
+    } catch (e) {
+      await w(`\x1b[31mAPI error: ${(e as Error).message}\x1b[0m\r\n`);
+    }
+    await w('\x1b[32m> \x1b[0m');
+  }
+
+  private async chatAnthropic(
+    key: string,
+    history: Array<{ role: string; content: string }>,
+    w: (s: string) => Promise<void>,
+  ): Promise<void> {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.',
+        messages: history,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Anthropic ${resp.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '(no response)';
+    history.push({ role: 'assistant', content: text });
+    await w(`\r\n${text.replace(/\n/g, '\r\n')}\r\n\r\n`);
+  }
+
+  private async chatOpenAI(
+    key: string,
+    history: Array<{ role: string; content: string }>,
+    w: (s: string) => Promise<void>,
+  ): Promise<void> {
+    const messages = [
+      { role: 'system', content: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.' },
+      ...history,
+    ];
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: 'gpt-4o', messages, max_tokens: 1024 }),
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`OpenAI ${resp.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const text = data.choices?.[0]?.message?.content || '(no response)';
+    history.push({ role: 'assistant', content: text });
+    await w(`\r\n${text.replace(/\n/g, '\r\n')}\r\n\r\n`);
+  }
+
+  private async chatGoogle(
+    key: string,
+    history: Array<{ role: string; content: string }>,
+    w: (s: string) => Promise<void>,
+  ): Promise<void> {
+    const contents = history.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: 'You are a helpful coding assistant running inside ClawKernel, a browser-based WASM runtime. Be concise.' }] },
+        }),
+      },
+    );
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Google ${resp.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '(no response)';
+    history.push({ role: 'assistant', content: text });
+    await w(`\r\n${text.replace(/\n/g, '\r\n')}\r\n\r\n`);
   }
 
   /** Run a Node.js script via QuickJS-WASM. */
