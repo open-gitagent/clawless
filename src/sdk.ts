@@ -155,15 +155,17 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     const extraEnv = { ...this._plugins.mergedEnv, ...opts.env };
 
     // Step 1: Boot
-    this._terminal.write('\x1b[90m[ClawLess] Booting WebContainer…\x1b[0m\r\n');
-    this._audit.log('status.change', 'boot sequence started', undefined, { source: 'boot' });
+    const runtimeName = this._options.runtime ?? 'webcontainer';
+    this._terminal.write(`\x1b[90m[ClawLess] Booting ${runtimeName === 'clawkernel' ? 'ClawKernel' : 'WebContainer'}…\x1b[0m\r\n`);
+    this._audit.log('status.change', 'boot sequence started', { runtime: runtimeName }, { source: 'boot' });
 
     try {
       await this._container.boot({
         workspace: Object.keys(extraWorkspace).length > 0 ? extraWorkspace : undefined,
         services: Object.keys(extraServices).length > 0 ? extraServices : undefined,
+        runtime: runtimeName,
       });
-      this._audit.log('status.change', 'webcontainer booted', undefined, { source: 'boot' });
+      this._audit.log('status.change', `${runtimeName} booted`, undefined, { source: 'boot' });
     } catch (e) {
       this._terminal.write(`\r\n\x1b[31m[ClawLess] Boot failed: ${(e as Error).message}\x1b[0m\r\n`);
       this.emit('error', e as Error);

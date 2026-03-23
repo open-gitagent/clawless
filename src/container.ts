@@ -7,6 +7,7 @@ import { GitService, type GitFile } from './git-service.js';
 import type { AgentConfig } from './types.js';
 import type { ContainerRuntime, RuntimeProcess } from './runtime/types.js';
 import { WebContainerRuntime } from './runtime/webcontainer-runtime.js';
+import { ClawKernelRuntime } from './runtime/clawkernel.js';
 
 export type ContainerStatus = 'booting' | 'installing' | 'ready' | 'error';
 
@@ -142,11 +143,13 @@ export class ContainerManager {
   }
 
   /** Boot the runtime and mount all workspace files. */
-  async boot(opts?: { workspace?: Record<string, string>; services?: Record<string, string> }): Promise<void> {
+  async boot(opts?: { workspace?: Record<string, string>; services?: Record<string, string>; runtime?: 'webcontainer' | 'clawkernel' }): Promise<void> {
     this.setStatus('booting');
 
-    // Create and boot the runtime (WebContainer for now, ClawKernel later)
-    this.runtime = new WebContainerRuntime();
+    // Create and boot the selected runtime
+    this.runtime = opts?.runtime === 'clawkernel'
+      ? new ClawKernelRuntime()
+      : new WebContainerRuntime();
     await this.runtime.boot();
 
     this.runtime.on('server-ready', (port: number, url: string) => {
