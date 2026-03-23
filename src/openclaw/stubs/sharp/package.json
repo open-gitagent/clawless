@@ -1,0 +1,7 @@
+{
+  "name": "sharp",
+  "version": "0.34.5",
+  "main": "./index.cjs",
+  "exports": { ".": { "import": "./index.mjs", "require": "./index.cjs" } },
+  "type": "commonjs"
+}

@@ -1,0 +1,14 @@
+'use strict';
+const ERR = () => Promise.reject(new Error('playwright unavailable in WebContainer'));
+const stub = { launch: ERR, launchServer: ERR, connect: ERR, connectOverCDP: ERR, executablePath: () => '', name: () => 'stub' };
+const chromium = { ...stub, name: () => 'chromium' };
+const firefox = { ...stub, name: () => 'firefox' };
+const webkit = { ...stub, name: () => 'webkit' };
+module.exports.chromium = chromium;
+module.exports.firefox = firefox;
+module.exports.webkit = webkit;
+module.exports.devices = {};
+module.exports.errors = { TimeoutError: class TimeoutError extends Error {} };
+module.exports.selectors = { register: () => Promise.resolve() };
+module.exports.default = { chromium, firefox, webkit };
+module.exports.__esModule = true;
