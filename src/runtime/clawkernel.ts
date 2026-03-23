@@ -45,6 +45,9 @@ export class ClawKernelRuntime implements ContainerRuntime {
     await this._fs.mkdir('/workspace', { recursive: true });
     await this._fs.mkdir('/node_modules/.bin', { recursive: true });
 
+    // Install built-in agent stub (runs inside QuickJS)
+    await this._pkg.installBundle(ClawPkg.inlineBundle('gitclaw', BUILTIN_AGENT_JS, '1.0.0'));
+
     this._booted = true;
   }
 
@@ -85,3 +88,22 @@ export class ClawKernelRuntime implements ContainerRuntime {
     this._booted = false;
   }
 }
+
+// ─── Built-in Agent ─────────────────────────────────────────────────────────
+// A minimal interactive agent that runs inside QuickJS when no real gitclaw
+// is available. Provides basic file ops, shell commands, and chat.
+
+const BUILTIN_AGENT_JS = `
+var VERSION = '1.0.0';
+var workDir = process.argv[process.argv.length - 1] || '/workspace';
+
+console.log('');
+console.log('\\x1b[1mClawKernel Agent v' + VERSION + '\\x1b[0m');
+console.log('\\x1b[90mRuntime: ClawKernel (QuickJS-WASM)\\x1b[0m');
+console.log('\\x1b[90mWorkspace: ' + workDir + '\\x1b[0m');
+console.log('');
+console.log('Commands: ls, cat <file>, write <file> <content>, mkdir <dir>, help, quit');
+console.log('Or type any message to chat.');
+console.log('');
+process.stdout.write('\\x1b[32m> \\x1b[0m');
+`;

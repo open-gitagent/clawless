@@ -119,7 +119,7 @@ export class ClawProc {
       }
 
       if (cmd === 'pwd') {
-        await outputWriter.write('/home\n');
+        await outputWriter.write('/\n');
         return 0;
       }
 
@@ -161,9 +161,9 @@ export class ClawProc {
     // Parse simple shell commands
     const trimmed = shellCmd.trim();
 
-    // echo $PWD
+    // echo $PWD — return root since mount tree is at /
     if (trimmed === 'echo $PWD') {
-      await outputWriter.write((opts?.env?.HOME || '/home') + '\n');
+      await outputWriter.write('/\n');
       return 0;
     }
 
