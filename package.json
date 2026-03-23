@@ -23,7 +23,8 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "jszip": "^3.10.1",
-    "monaco-editor": "^0.55.1"
+    "monaco-editor": "^0.55.1",
+    "quickjs-emscripten": "^0.32.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

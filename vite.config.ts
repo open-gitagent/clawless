@@ -44,9 +44,6 @@ export default defineConfig(({ mode }) => {
         }
       : {
           target: 'esnext',
-          rollupOptions: {
-            external: ['quickjs-emscripten'],
-          },
         },
     optimizeDeps: {
       exclude: [

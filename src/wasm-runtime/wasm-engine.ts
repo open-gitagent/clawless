@@ -18,8 +18,8 @@ let moduleCache: any = null;
 
 async function loadQuickJS(): Promise<any> {
   if (moduleCache) return moduleCache;
-  // @ts-ignore — dynamic import, resolved at runtime not build time
-  const { newQuickJSAsyncWASMModule } = await import(/* @vite-ignore */ 'quickjs-emscripten');
+  const qjs = await import('quickjs-emscripten');
+  const { newQuickJSAsyncWASMModule } = qjs;
   moduleCache = await newQuickJSAsyncWASMModule();
   return moduleCache;
 }
