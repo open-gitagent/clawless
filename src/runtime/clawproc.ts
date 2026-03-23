@@ -128,8 +128,12 @@ export class ClawProc {
         return await this.runInteractiveShell(inputReader, outputWriter, opts);
       }
 
-      // Node.js execution via QuickJS-WASM
+      // Node.js execution — check if it's the built-in agent (interactive)
       if (cmd === 'node') {
+        const scriptPath = args[0] || '';
+        if (scriptPath.includes('gitclaw') || scriptPath.includes('node_modules')) {
+          return await this.runBuiltinAgent(inputReader, outputWriter, opts);
+        }
         return await this.runNode(args, opts, inputReader, outputWriter);
       }
 
@@ -253,6 +257,160 @@ export class ClawProc {
         } else {
           buffer += char;
           await outputWriter.write(char);
+        }
+      }
+    }
+    return 0;
+  }
+
+  /** Run the built-in interactive agent (long-running REPL). */
+  private async runBuiltinAgent(
+    inputReader: ReadableStreamDefaultReader<string>,
+    outputWriter: WritableStreamDefaultWriter<string>,
+    _opts?: SpawnOptions,
+  ): Promise<number> {
+    const w = (s: string) => outputWriter.write(s);
+
+    await w('\r\n\x1b[1mClawKernel Agent v1.0.0\x1b[0m\r\n');
+    await w('\x1b[90mRuntime: ClawKernel (WASM) — zero WebContainers\x1b[0m\r\n');
+    await w('\x1b[90mWorkspace: /workspace\x1b[0m\r\n\r\n');
+    await w('Commands: \x1b[33mls\x1b[0m, \x1b[33mcat <file>\x1b[0m, \x1b[33mwrite <file> <content>\x1b[0m, \x1b[33mmkdir <dir>\x1b[0m, \x1b[33mhelp\x1b[0m, \x1b[33mquit\x1b[0m\r\n');
+    await w('Or type any message to chat.\r\n\r\n');
+    await w('\x1b[32m> \x1b[0m');
+
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await inputReader.read();
+      if (done) break;
+
+      for (const char of value) {
+        if (char === '\r' || char === '\n') {
+          await w('\r\n');
+          const cmd = buffer.trim();
+          buffer = '';
+
+          if (!cmd) { await w('\x1b[32m> \x1b[0m'); continue; }
+
+          if (cmd === 'quit' || cmd === 'exit' || cmd === '/quit') {
+            await w('\x1b[90mGoodbye.\x1b[0m\r\n');
+            return 0;
+          }
+
+          if (cmd === 'help') {
+            await w('\x1b[1mAvailable commands:\x1b[0m\r\n');
+            await w('  \x1b[33mls [dir]\x1b[0m          — list files\r\n');
+            await w('  \x1b[33mcat <file>\x1b[0m        — show file contents\r\n');
+            await w('  \x1b[33mwrite <f> <text>\x1b[0m  — write text to file\r\n');
+            await w('  \x1b[33mmkdir <dir>\x1b[0m       — create directory\r\n');
+            await w('  \x1b[33mrm <path>\x1b[0m         — delete file/dir\r\n');
+            await w('  \x1b[33mpwd\x1b[0m               — print working directory\r\n');
+            await w('  \x1b[33mquit\x1b[0m              — exit agent\r\n');
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd === 'pwd') {
+            await w('/workspace\r\n');
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd === 'ls' || cmd.startsWith('ls ')) {
+            const dir = cmd === 'ls' ? '/workspace' : cmd.slice(3).trim();
+            const lookupDir = dir.startsWith('/') ? dir : `/workspace/${dir}`;
+            try {
+              const entries = await this.fs.readdir(lookupDir, { withFileTypes: true });
+              if (entries.length === 0) {
+                await w('\x1b[90m(empty)\x1b[0m\r\n');
+              }
+              for (const e of entries) {
+                if (e.isDirectory()) {
+                  await w(`\x1b[34m${e.name}/\x1b[0m\r\n`);
+                } else {
+                  await w(`${e.name}\r\n`);
+                }
+              }
+            } catch {
+              await w(`\x1b[31mNo such directory: ${dir}\x1b[0m\r\n`);
+            }
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd.startsWith('cat ')) {
+            const file = cmd.slice(4).trim();
+            const path = file.startsWith('/') ? file : `/workspace/${file}`;
+            try {
+              const content = await this.fs.readFile(path, 'utf-8');
+              await w(content.replace(/\n/g, '\r\n'));
+              if (!content.endsWith('\n')) await w('\r\n');
+            } catch {
+              await w(`\x1b[31mNo such file: ${file}\x1b[0m\r\n`);
+            }
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd.startsWith('write ')) {
+            const rest = cmd.slice(6).trim();
+            const spaceIdx = rest.indexOf(' ');
+            if (spaceIdx === -1) {
+              await w('\x1b[31mUsage: write <file> <content>\x1b[0m\r\n');
+            } else {
+              const file = rest.slice(0, spaceIdx);
+              const content = rest.slice(spaceIdx + 1);
+              const path = file.startsWith('/') ? file : `/workspace/${file}`;
+              try {
+                await this.fs.writeFile(path, content + '\n');
+                await w(`\x1b[32mWrote ${content.length + 1} bytes to ${file}\x1b[0m\r\n`);
+              } catch (e) {
+                await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
+              }
+            }
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd.startsWith('mkdir ')) {
+            const dir = cmd.slice(6).trim();
+            const path = dir.startsWith('/') ? dir : `/workspace/${dir}`;
+            try {
+              await this.fs.mkdir(path, { recursive: true });
+              await w(`\x1b[32mCreated ${dir}\x1b[0m\r\n`);
+            } catch (e) {
+              await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
+            }
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          if (cmd.startsWith('rm ')) {
+            const target = cmd.slice(3).trim();
+            const path = target.startsWith('/') ? target : `/workspace/${target}`;
+            try {
+              await this.fs.rm(path, { recursive: true });
+              await w(`\x1b[32mRemoved ${target}\x1b[0m\r\n`);
+            } catch (e) {
+              await w(`\x1b[31mError: ${(e as Error).message}\x1b[0m\r\n`);
+            }
+            await w('\x1b[32m> \x1b[0m');
+            continue;
+          }
+
+          // Unknown command — echo it back as a chat message
+          await w(`\x1b[90mYou said: ${cmd}\x1b[0m\r\n`);
+          await w('\x1b[90m(AI chat requires an API key — configure in sidebar)\x1b[0m\r\n');
+          await w('\x1b[32m> \x1b[0m');
+
+        } else if (char === '\x7f' || char === '\b') {
+          if (buffer.length > 0) {
+            buffer = buffer.slice(0, -1);
+            await w('\b \b');
+          }
+        } else if (char.charCodeAt(0) >= 32) {
+          buffer += char;
+          await w(char);
         }
       }
     }
