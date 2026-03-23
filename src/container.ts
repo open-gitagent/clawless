@@ -1,4 +1,3 @@
-import { WebContainer, type WebContainerProcess } from '@webcontainer/api';
 import type { TerminalManager } from './terminal.js';
 import { buildWorkspaceFiles, buildContainerPackageJson, GIT_STUB_JS } from './workspace.js';
 import { AuditLog, type AuditSource } from './audit.js';
@@ -6,6 +5,8 @@ import { NETWORK_HOOK_CJS } from './network-hook.js';
 import { PolicyEngine, PolicyDeniedError, type PolicyAction } from './policy.js';
 import { GitService, type GitFile } from './git-service.js';
 import type { AgentConfig } from './types.js';
+import type { ContainerRuntime, RuntimeProcess } from './runtime/types.js';
+import { WebContainerRuntime } from './runtime/webcontainer-runtime.js';
 
 export type ContainerStatus = 'booting' | 'installing' | 'ready' | 'error';
 
@@ -16,8 +17,8 @@ export interface ContainerEnv {
 }
 
 export class ContainerManager {
-  private wc: WebContainer | null = null;
-  private shellProcess: WebContainerProcess | null = null;
+  private runtime: ContainerRuntime | null = null;
+  private shellProcess: RuntimeProcess | null = null;
   private shellWriter: WritableStreamDefaultWriter<string> | null = null;
   private _status: ContainerStatus = 'booting';
   private onStatusChange?: (s: ContainerStatus) => void;
@@ -70,7 +71,6 @@ export class ContainerManager {
     this.outputFlushTimer = setTimeout(() => {
       this.outputFlushTimer = null;
       if (this.outputLineBuf.length === 0) return;
-      // No __NET_AUDIT__ marker possible in a partial line (no newline) — safe to write directly
       terminal.write(this.outputLineBuf);
       this.audit?.logStdout(this.outputLineBuf);
       this.outputLineBuf = '';
@@ -85,20 +85,17 @@ export class ContainerManager {
     const buf = this.outputLineBuf + chunk;
     const lastNewline = buf.lastIndexOf('\n');
 
-    // No complete line yet — buffer and schedule a flush
     if (lastNewline === -1) {
       this.outputLineBuf = buf;
       this.scheduleFlush(terminal, source);
       return;
     }
 
-    // We have a complete line — cancel any pending flush
     if (this.outputFlushTimer) {
       clearTimeout(this.outputFlushTimer);
       this.outputFlushTimer = null;
     }
 
-    // Split into complete lines + remainder
     const complete = buf.slice(0, lastNewline);
     this.outputLineBuf = buf.slice(lastNewline + 1);
 
@@ -144,17 +141,20 @@ export class ContainerManager {
     }
   }
 
-  /** Boot the WebContainer and mount all workspace files. */
+  /** Boot the runtime and mount all workspace files. */
   async boot(opts?: { workspace?: Record<string, string>; services?: Record<string, string> }): Promise<void> {
     this.setStatus('booting');
-    this.wc = await WebContainer.boot();
 
-    this.wc.on('server-ready', (port: number, url: string) => {
+    // Create and boot the runtime (WebContainer for now, ClawKernel later)
+    this.runtime = new WebContainerRuntime();
+    await this.runtime.boot();
+
+    this.runtime.on('server-ready', (port: number, url: string) => {
       if (this.policy) {
         const result = this.policy.check('server.bind', String(port));
         if (!result.allowed) {
           this.audit?.log('policy.deny', `server.bind: ${port}`, { rule: result.rule }, { source: 'policy', level: 'warn' });
-          return; // skip URL storage and listeners
+          return;
         }
       }
       this.serverUrls.set(port, url);
@@ -162,7 +162,7 @@ export class ContainerManager {
       for (const fn of this.serverListeners) fn(port, url);
     });
 
-    await this.wc.mount({
+    await this.runtime.mount({
       'package.json':     { file: { contents: buildContainerPackageJson(opts?.services) } },
       'git-stub.js':      { file: { contents: GIT_STUB_JS } },
       'network-hook.cjs': { file: { contents: NETWORK_HOOK_CJS } },
@@ -176,7 +176,6 @@ export class ContainerManager {
 
   /**
    * Use Node.js to chmod git-stub.js and symlink it into node_modules/.bin/git.
-   * Node.js fs.chmod works regardless of mount permissions.
    */
   private async linkGitStub(): Promise<void> {
     const script = [
@@ -186,7 +185,7 @@ export class ContainerManager {
       "fs.symlinkSync('../../git-stub.js', 'node_modules/.bin/git');",
     ].join('\n');
     this.audit?.log('process.spawn', 'node -e <link-git-stub>', undefined, { source: 'boot' });
-    const proc = await this.wc!.spawn('node', ['-e', script]);
+    const proc = await this.runtime!.spawn('node', ['-e', script]);
     proc.output.pipeTo(new WritableStream());
     const exitCode = await proc.exit;
     this.audit?.log('process.exit', `link-git-stub exited ${exitCode}`, { exitCode }, { source: 'boot' });
@@ -194,13 +193,13 @@ export class ContainerManager {
 
   /** Run `npm install` inside the container. All output goes to terminal. */
   async runNpmInstall(terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.setStatus('installing');
 
     this.enforcePolicy('process.spawn', 'npm install --legacy-peer-deps --ignore-scripts', { activeProcesses: this.activeProcessCount });
     this.audit?.log('process.spawn', 'npm install --legacy-peer-deps --ignore-scripts', undefined, { source: 'boot' });
     this.activeProcessCount++;
-    const proc = await this.wc.spawn('npm', [
+    const proc = await this.runtime.spawn('npm', [
       'install',
       '--legacy-peer-deps',
       '--ignore-scripts',
@@ -237,23 +236,18 @@ export class ContainerManager {
       throw new Error(`npm install failed (exit ${exitCode}):\n${tail}`);
     }
 
-    // Link git-stub.js into node_modules/.bin/git with proper execute bit
     await this.linkGitStub();
   }
 
   /**
    * Store API key and patch agent.yaml with the chosen model.
-   * The key is injected directly into the shell env when startShell() is called.
    */
   async configureEnv(env: ContainerEnv): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.write', 'workspace/.env');
 
-    // Use all user-supplied env vars directly
     this.apiEnvVars = { ...env.envVars };
 
-    // If we have an OpenAI key, fetch an ephemeral realtime token from the
-    // browser side (WebContainer's fetch drops Authorization headers)
     const openaiKey = this.apiEnvVars['OPENAI_API_KEY'];
     if (openaiKey) {
       try {
@@ -274,11 +268,10 @@ export class ContainerManager {
           }
         }
       } catch {
-        // Non-fatal — gitclaw will try its own auth
+        // Non-fatal
       }
     }
 
-    // Log env config with masked keys
     const maskedVars: Record<string, string> = {};
     for (const [k, v] of Object.entries(env.envVars)) {
       maskedVars[k] = AuditLog.maskKey(v);
@@ -289,23 +282,21 @@ export class ContainerManager {
       vars: maskedVars,
     }, { source: 'user' });
 
-    // Write .env file so gitclaw (and its voice server) can read keys
     const envLines: string[] = [];
     for (const [key, val] of Object.entries(this.apiEnvVars)) {
       envLines.push(`${key}=${val}`);
     }
-    await this.wc.fs.writeFile('workspace/.env', envLines.join('\n') + '\n');
+    await this.runtime.fs.writeFile('workspace/.env', envLines.join('\n') + '\n');
     this.audit?.log('file.write', 'workspace/.env', { keys: Object.keys(this.apiEnvVars) }, { source: 'system' });
 
-    // Patch agent.yaml with the chosen model
     try {
-      const yaml = await this.wc.fs.readFile('workspace/agent.yaml', 'utf-8');
+      const yaml = await this.runtime.fs.readFile('workspace/agent.yaml', 'utf-8');
       this.audit?.log('file.read', 'workspace/agent.yaml', undefined, { source: 'system' });
       const patched = yaml.replace(
         /preferred:\s*"[^"]*"/,
         `preferred: "${env.model}"`,
       );
-      await this.wc.fs.writeFile('workspace/agent.yaml', patched);
+      await this.runtime.fs.writeFile('workspace/agent.yaml', patched);
       this.audit?.log('file.write', 'workspace/agent.yaml', { action: 'patch-model', model: env.model }, { source: 'system' });
     } catch {
       // agent.yaml might be custom — leave it
@@ -315,7 +306,7 @@ export class ContainerManager {
   /** Discover the container's home/project directory via $PWD. */
   private async getHomeDir(): Promise<string> {
     this.audit?.log('process.spawn', 'sh -c "echo $PWD"', undefined, { source: 'system' });
-    const proc = await this.wc!.spawn('sh', ['-c', 'echo $PWD']);
+    const proc = await this.runtime!.spawn('sh', ['-c', 'echo $PWD']);
     const reader = proc.output.getReader();
     const decoder = new TextDecoder();
     let out = '';
@@ -328,12 +319,9 @@ export class ContainerManager {
     return out.trim();
   }
 
-  /**
-   * Spawn gitclaw DIRECTLY with a PTY — not inside jsh.
-   * jsh doesn't forward the PTY to child processes, breaking interactive REPLs.
-   */
+  /** Spawn gitclaw DIRECTLY with a PTY. */
   async startGitclaw(terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.setStatus('ready');
 
     const { cols, rows } = terminal.dimensions;
@@ -344,7 +332,7 @@ export class ContainerManager {
     this.audit?.log('process.spawn', spawnCmd, undefined, { source: 'agent' });
     this.activeProcessCount++;
 
-    this.shellProcess = await this.wc.spawn(
+    this.shellProcess = await this.runtime.spawn(
       'node',
       [`${homeDir}/node_modules/gitclaw/dist/index.js`, '--dir', `${homeDir}/workspace`],
       {
@@ -358,16 +346,14 @@ export class ContainerManager {
       },
     );
 
-    // Wire output → terminal (with audit + network marker parsing)
     this.shellProcess.output.pipeTo(
       new WritableStream({
         write: (chunk) => {
-          this.processOutputChunk(chunk, terminal, 'agent');
+          this.processOutputChunk(chunk as string, terminal, 'agent');
         },
       }),
     );
 
-    // Wire keystrokes directly to gitclaw stdin (no jsh in between)
     this.shellWriter = this.shellProcess.input.getWriter();
     terminal.onData((data) => {
       this.shellWriter?.write(data);
@@ -376,7 +362,6 @@ export class ContainerManager {
 
     window.addEventListener('resize', () => this.resizeShell(terminal));
 
-    // Restart gitclaw when it exits (e.g. user types /quit)
     this.shellProcess.exit.then((code) => {
       this.activeProcessCount--;
       this.audit?.log('process.exit', `gitclaw exited`, { exitCode: code }, { source: 'agent' });
@@ -385,12 +370,9 @@ export class ContainerManager {
     });
   }
 
-  /**
-   * Start a raw jsh shell for file exploration / debugging.
-   * Note: interactive Node.js REPLs won't work inside jsh — use startGitclaw() instead.
-   */
+  /** Start a raw jsh shell for file exploration / debugging. */
   async startShell(terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
 
     const { cols, rows } = terminal.dimensions;
     const homeDir = await this.getHomeDir();
@@ -399,7 +381,7 @@ export class ContainerManager {
     this.audit?.log('process.spawn', '/bin/jsh --osc', undefined, { source: 'user' });
     this.activeProcessCount++;
 
-    this.shellProcess = await this.wc.spawn('/bin/jsh', ['--osc'], {
+    this.shellProcess = await this.runtime.spawn('/bin/jsh', ['--osc'], {
       terminal: { cols, rows },
       env: {
         ...this.apiEnvVars,
@@ -412,7 +394,7 @@ export class ContainerManager {
     this.shellProcess.output.pipeTo(
       new WritableStream({
         write: (chunk) => {
-          this.processOutputChunk(chunk, terminal, 'user');
+          this.processOutputChunk(chunk as string, terminal, 'user');
         },
       }),
     );
@@ -430,7 +412,7 @@ export class ContainerManager {
   private resizeShell(terminal: TerminalManager): void {
     if (!this.shellProcess) return;
     const { cols, rows } = terminal.dimensions;
-    this.shellProcess.resize({ cols, rows });
+    this.shellProcess.resize?.({ cols, rows });
   }
 
   async sendToShell(command: string): Promise<void> {
@@ -453,34 +435,34 @@ export class ContainerManager {
   }
 
   async listWorkspaceFiles(dir = 'workspace'): Promise<string[]> {
-    if (!this.wc) return [];
+    if (!this.runtime) return [];
     try {
-      return await recursiveList(this.wc, dir, dir);
+      return await recursiveList(this.runtime, dir, dir);
     } catch {
       return [];
     }
   }
 
   async readFile(path: string): Promise<string> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.read', path);
     this.audit?.log('file.read', path, undefined, { source: 'user' });
-    return this.wc.fs.readFile(path, 'utf-8');
+    return this.runtime.fs.readFile(path, 'utf-8');
   }
 
   /** Read a file as raw bytes (for binary download). */
   async readFileBuffer(path: string): Promise<Uint8Array> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.read', path);
     this.audit?.log('file.read', path, { binary: true }, { source: 'user' });
-    return this.wc.fs.readFile(path);
+    return this.runtime.fs.readFile(path);
   }
 
   async writeFile(path: string, contents: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.write', path, { size: contents.length });
     this.audit?.log('file.write', path, { length: contents.length }, { source: 'user' });
-    await this.wc.fs.writeFile(path, contents);
+    await this.runtime.fs.writeFile(path, contents);
     for (const fn of this.fileChangeListeners) fn(path);
   }
 
@@ -491,7 +473,7 @@ export class ContainerManager {
 
   /** Clone a GitHub repo into /workspace via the GitHub API. */
   async cloneRepo(url: string, token: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     const { owner, repo } = GitService.parseRepoUrl(url);
     this.enforcePolicy('git.clone', `${owner}/${repo}`);
     this.audit?.log('git.clone', `${owner}/${repo}`, { url }, { source: 'user' });
@@ -500,16 +482,14 @@ export class ContainerManager {
     await svc.detectDefaultBranch();
     const files = await svc.fetchRepoTree();
 
-    // Write files to /workspace
     for (const file of files) {
       const fullPath = `workspace/${file.path}`;
-      // Ensure parent directories exist
       const parts = fullPath.split('/');
       for (let i = 1; i < parts.length - 1; i++) {
         const dir = parts.slice(0, i + 1).join('/');
-        try { await this.wc.fs.mkdir(dir); } catch { /* exists */ }
+        try { await this.runtime.fs.mkdir(dir); } catch { /* exists */ }
       }
-      await this.wc.fs.writeFile(fullPath, file.content);
+      await this.runtime.fs.writeFile(fullPath, file.content);
     }
 
     this.gitService = svc;
@@ -520,23 +500,22 @@ export class ContainerManager {
 
   /** Read all workspace files and push changes to GitHub. */
   async syncToRepo(message?: string): Promise<string> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     if (!this.gitService) throw new Error('No repository cloned');
 
     const owner = this.gitService.repoOwner;
     const repo = this.gitService.repoName;
     this.enforcePolicy('git.push', `${owner}/${repo}`);
 
-    // Collect all workspace files (excluding ignored paths)
     const IGNORED = /^(node_modules\/|\.git\/|\.env$)/;
     const allPaths = await this.listWorkspaceFiles();
     const files: GitFile[] = [];
 
     for (const relPath of allPaths) {
-      if (relPath.endsWith('/')) continue; // skip directories
+      if (relPath.endsWith('/')) continue;
       if (IGNORED.test(relPath)) continue;
       try {
-        const content = await this.wc.fs.readFile(`workspace/${relPath}`, 'utf-8');
+        const content = await this.runtime.fs.readFile(`workspace/${relPath}`, 'utf-8');
         files.push({ path: relPath, content });
       } catch { /* skip unreadable */ }
     }
@@ -554,12 +533,17 @@ export class ContainerManager {
   /** Check if a repo has been cloned. */
   get hasClonedRepo(): boolean { return this.gitService !== null; }
 
-  /** Expose the raw WebContainer instance for direct user access. */
-  getWebContainer(): WebContainer | null { return this.wc; }
+  /** Expose the raw WebContainer instance for direct user access (SDK backward compat). */
+  getWebContainer() {
+    if (this.runtime instanceof WebContainerRuntime) {
+      return (this.runtime as WebContainerRuntime).getWebContainer();
+    }
+    return null;
+  }
 
-  /** Launch a generic agent process with PTY, similar to startGitclaw(). */
+  /** Launch a generic agent process with PTY. */
   async startAgent(config: AgentConfig, terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.setStatus('ready');
 
     const { cols, rows } = terminal.dimensions;
@@ -573,7 +557,7 @@ export class ContainerManager {
     this.audit?.log('process.spawn', spawnCmd, undefined, { source: 'agent' });
     this.activeProcessCount++;
 
-    this.shellProcess = await this.wc.spawn('node', [entry, ...args], {
+    this.shellProcess = await this.runtime.spawn('node', [entry, ...args], {
       terminal: { cols, rows },
       env: {
         ...this.apiEnvVars,
@@ -587,7 +571,7 @@ export class ContainerManager {
     this.shellProcess.output.pipeTo(
       new WritableStream({
         write: (chunk) => {
-          this.processOutputChunk(chunk, terminal, 'agent');
+          this.processOutputChunk(chunk as string, terminal, 'agent');
         },
       }),
     );
@@ -610,14 +594,14 @@ export class ContainerManager {
 
   /** Run an arbitrary startup script inside the container shell. */
   async runStartupScript(script: string, terminal: TerminalManager): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     const homeDir = await this.getHomeDir();
 
     this.enforcePolicy('process.spawn', `sh -c <startup-script>`, { activeProcesses: this.activeProcessCount });
     this.audit?.log('process.spawn', 'startup script', { script: script.slice(0, 200) }, { source: 'boot' });
     this.activeProcessCount++;
 
-    const proc = await this.wc.spawn('sh', ['-c', `cd workspace && ${script}`], {
+    const proc = await this.runtime.spawn('sh', ['-c', `cd workspace && ${script}`], {
       env: {
         ...this.apiEnvVars,
         PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
@@ -628,7 +612,7 @@ export class ContainerManager {
     proc.output.pipeTo(
       new WritableStream({
         write: (chunk) => {
-          this.processOutputChunk(chunk, terminal, 'boot');
+          this.processOutputChunk(chunk as string, terminal, 'boot');
         },
       }),
     );
@@ -643,13 +627,13 @@ export class ContainerManager {
 
   /** Execute a command and return stdout as a string. */
   async exec(cmd: string): Promise<string> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
 
     this.enforcePolicy('process.spawn', cmd, { activeProcesses: this.activeProcessCount });
     this.audit?.log('process.spawn', cmd, undefined, { source: 'user' });
     this.activeProcessCount++;
 
-    const proc = await this.wc.spawn('sh', ['-c', cmd]);
+    const proc = await this.runtime.spawn('sh', ['-c', cmd]);
     const reader = proc.output.getReader();
     const decoder = new TextDecoder();
     let output = '';
@@ -669,26 +653,26 @@ export class ContainerManager {
 
   /** Create a directory inside the container. */
   async mkdir(path: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.write', path);
-    await this.wc.fs.mkdir(path, { recursive: true });
+    await this.runtime.fs.mkdir(path, { recursive: true });
     this.audit?.log('file.write', `mkdir ${path}`, undefined, { source: 'user' });
   }
 
   /** Remove a file inside the container. */
   async remove(path: string): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.write', path);
-    await this.wc.fs.rm(path, { recursive: true });
+    await this.runtime.fs.rm(path, { recursive: true });
     this.audit?.log('file.write', `remove ${path}`, undefined, { source: 'user' });
   }
 
   /** Write binary data to a file inside the container. */
   async writeFileBytes(path: string, content: Uint8Array): Promise<void> {
-    if (!this.wc) throw new Error('Container not booted');
+    if (!this.runtime) throw new Error('Container not booted');
     this.enforcePolicy('file.write', path, { size: content.byteLength });
     this.audit?.log('file.write', path, { length: content.byteLength, binary: true }, { source: 'user' });
-    await this.wc.fs.writeFile(path, content);
+    await this.runtime.fs.writeFile(path, content);
     for (const fn of this.fileChangeListeners) fn(path);
   }
 
@@ -709,8 +693,8 @@ export class ContainerManager {
 
   /** Start watching the workspace directory for file-system events. */
   startWatching(): void {
-    if (!this.wc) return;
-    this.wc.fs.watch('/workspace', { recursive: true }, (_event, filename) => {
+    if (!this.runtime) return;
+    this.runtime.fs.watch('/workspace', { recursive: true }, (_event, filename) => {
       if (filename) {
         const path = `workspace/${filename}`;
         for (const fn of this.fileChangeListeners) fn(path);
@@ -722,11 +706,11 @@ export class ContainerManager {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function recursiveList(
-  wc: WebContainer,
+  runtime: ContainerRuntime,
   absDir: string,
   rootDir: string,
 ): Promise<string[]> {
-  const entries = await wc.fs.readdir(absDir, { withFileTypes: true });
+  const entries = await runtime.fs.readdir(absDir, { withFileTypes: true });
   const results: string[] = [];
 
   for (const entry of entries) {
@@ -736,7 +720,7 @@ async function recursiveList(
 
     if (entry.isDirectory()) {
       results.push(rel + '/');
-      const children = await recursiveList(wc, abs, rootDir);
+      const children = await recursiveList(runtime, abs, rootDir);
       results.push(...children);
     } else {
       results.push(rel);
