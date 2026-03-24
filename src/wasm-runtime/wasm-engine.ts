@@ -211,6 +211,44 @@ export class WasmEngine {
       this.opts.stderr(parts.join(' ') + '\n');
     });
 
+    // Timers — QuickJS doesn't have these natively
+    const setTimeoutFn = ctx.newFunction('setTimeout', (...args: QuickJSHandle[]) => {
+      const fn = args[0];
+      const delay = args[1] ? ctx.getNumber(args[1]) : 0;
+      const fnCopy = fn.dup();
+      setTimeout(() => {
+        try { ctx.callFunction(fnCopy, ctx.global); } catch { /* */ }
+        fnCopy.dispose();
+      }, delay);
+      return ctx.newNumber(0);
+    });
+    ctx.setProp(ctx.global, 'setTimeout', setTimeoutFn);
+    setTimeoutFn.dispose();
+
+    const setIntervalFn = ctx.newFunction('setInterval', (...args: QuickJSHandle[]) => {
+      const fn = args[0];
+      const delay = args[1] ? ctx.getNumber(args[1]) : 1000;
+      const fnCopy = fn.dup();
+      const id = setInterval(() => {
+        try { ctx.callFunction(fnCopy, ctx.global); } catch { /* */ }
+      }, delay);
+      return ctx.newNumber(id as unknown as number);
+    });
+    ctx.setProp(ctx.global, 'setInterval', setIntervalFn);
+    setIntervalFn.dispose();
+
+    const clearTimeoutFn = ctx.newFunction('clearTimeout', (...args: QuickJSHandle[]) => {
+      if (args[0]) clearTimeout(ctx.getNumber(args[0]));
+    });
+    ctx.setProp(ctx.global, 'clearTimeout', clearTimeoutFn);
+    clearTimeoutFn.dispose();
+
+    const clearIntervalFn = ctx.newFunction('clearInterval', (...args: QuickJSHandle[]) => {
+      if (args[0]) clearInterval(ctx.getNumber(args[0]));
+    });
+    ctx.setProp(ctx.global, 'clearInterval', clearIntervalFn);
+    clearIntervalFn.dispose();
+
     // fs operations (sync, host-side)
     this.installHostFn('__fs_readFileSync', (...args) => {
       const path = ctx.getString(args[0]);
@@ -586,8 +624,8 @@ globalThis.AbortController = typeof AbortController !== 'undefined' ? AbortContr
 globalThis.URL = typeof URL !== 'undefined' ? URL : function(s){this.href=s;this.toString=function(){return s}};
 globalThis.URLSearchParams = typeof URLSearchParams !== 'undefined' ? URLSearchParams : function(){};
 globalThis.queueMicrotask = function(fn) { Promise.resolve().then(fn); };
-globalThis.setImmediate = function(fn) { setTimeout(fn, 0); };
-globalThis.clearImmediate = clearTimeout;
+globalThis.setImmediate = function(fn) { return setTimeout(fn, 0); };
+globalThis.clearImmediate = function(id) { clearTimeout(id); };
 `;
   }
 }
