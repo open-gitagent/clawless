@@ -94,7 +94,11 @@ export class WasmEngine {
     if (!this.ctx) throw new Error('Engine not initialized');
 
     try {
-      const result = await this.ctx.evalCodeAsync(code, filename);
+      // Prepend shim code if require isn't defined yet (first run)
+      const fullCode = code.includes('var fs = require') || code.includes("require('")
+        ? this.buildShimCode() + '\n;\n' + code
+        : code;
+      const result = await this.ctx.evalCodeAsync(fullCode, filename);
       if (result.error) {
         const err = this.ctx.dump(result.error);
         result.error.dispose();
