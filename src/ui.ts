@@ -1,4 +1,5 @@
 import type { ContainerManager, ContainerStatus } from './container.js';
+import { TerminalManager } from './terminal.js';
 import { createEditorInstance, openFileModel, getModelContent, closeFileModel, disposeAll, initMonacoTheme } from './monaco-editor.js';
 import type { AuditLog } from './audit.js';
 import { PolicyEngine } from './policy.js';
@@ -38,6 +39,10 @@ export class UIManager {
   private activePanelId: string | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Dynamic terminal tab state
+  private shellTerminals = new Map<string, TerminalManager>(); // id → TerminalManager
+  private shellCounter = 0;
+
   // Tab state
   private tabs: Tab[] = [];
   private activeTabPath: string | null = null;
@@ -67,6 +72,7 @@ export class UIManager {
     this.bindFileTree();
     this.bindKeyboard();
     this.bindResizeHandles();
+    this.bindTerminalTabs();
     this.populateModelOptions();
     this.restoreConfig();
     this.bindRepoControls();
@@ -161,6 +167,180 @@ export class UIManager {
 
     // Main-content ↔ sidebar (horizontal)
     this.initHResize('resize-sidebar', 'sidebar', 'after', 150, 600);
+  }
+
+  private bindTerminalTabs(): void {
+    const panesContainer = document.getElementById('terminal-panes')!;
+    const tabsContainer = document.getElementById('terminal-tabs')!;
+    const btnAdd = document.getElementById('btn-add-terminal')!;
+    const btnSplit = document.getElementById('btn-split-terminal')!;
+    const splitPane = document.getElementById('terminal-pane-split')!;
+    const splitHandle = document.getElementById('resize-terminal-split')!;
+    const agentPane = document.getElementById('terminal-pane-agent')!;
+
+    // ── Activate agent tab initially ────────────────────────────────────
+    this.setActiveTerminalTab('agent');
+
+    // ── Tab click delegation ─────────────────────────────────────────────
+    tabsContainer.addEventListener('click', (e) => {
+      const tab = (e.target as HTMLElement).closest('.term-tab') as HTMLElement | null;
+      if (!tab) return;
+      const id = tab.dataset['id']!;
+      if ((e.target as HTMLElement).classList.contains('term-tab-close')) {
+        // Don't activate on close
+        return;
+      }
+      this.setActiveTerminalTab(id);
+    });
+
+    // ── Add new terminal ─────────────────────────────────────────────────
+    btnAdd.addEventListener('click', () => {
+      this.shellCounter++;
+      const id = `shell-${this.shellCounter}`;
+      const label = `Terminal ${this.shellCounter}`;
+
+      // Create terminal manager
+      const tm = new TerminalManager();
+      this.shellTerminals.set(id, tm);
+
+      // Create pane
+      const pane = document.createElement('div');
+      pane.className = 'term-pane';
+      pane.id = `terminal-pane-${id}`;
+      const inner = document.createElement('div');
+      inner.className = 'term-pane-inner';
+      inner.id = `terminal-container-${id}`;
+      pane.appendChild(inner);
+      // Insert before split-pane
+      panesContainer.insertBefore(pane, splitPane);
+
+      // Mount terminal
+      tm.mount(inner);
+
+      // Spawn shell in container
+      this.container.spawnShell(id, tm).catch(err => {
+        tm.write(`\r\n\x1b[31m[Error] ${err.message}\x1b[0m\r\n`);
+      });
+
+      // Create tab
+      this.addTerminalTab(tabsContainer, id, label);
+
+      // Activate the new tab
+      this.setActiveTerminalTab(id);
+    });
+
+    // ── Split button ─────────────────────────────────────────────────────
+    btnSplit.addEventListener('click', () => {
+      const isSplit = panesContainer.classList.toggle('split-active');
+      if (isSplit) {
+        // Show the Agent pane in the split slot
+        splitPane.innerHTML = '';
+        const cloneContainer = document.createElement('div');
+        cloneContainer.className = 'term-pane-inner';
+        cloneContainer.id = 'terminal-container-split';
+        splitPane.appendChild(cloneContainer);
+        agentPane.style.flex = '1';
+        splitPane.classList.remove('hidden');
+        splitHandle.classList.remove('hidden');
+        // Mount a fresh terminal into the split slot that mirrors agent output
+        // (for simplicity, just show a notice; true mirroring requires piping)
+        cloneContainer.innerHTML = '<div style="padding:8px;color:#8b949e;font-family:monospace;font-size:12px;">Agent terminal view (split)</div>';
+      } else {
+        splitPane.classList.add('hidden');
+        splitHandle.classList.add('hidden');
+      }
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    // ── Resize handle for split ──────────────────────────────────────────
+    {
+      let startX = 0, startW = 0;
+      const min = 150;
+      const onMove = (e: MouseEvent) => {
+        agentPane.style.flex = `0 0 ${Math.max(min, startW + e.clientX - startX)}px`;
+      };
+      const onUp = () => {
+        splitHandle.classList.remove('active');
+        document.body.classList.remove('resizing-col');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        window.dispatchEvent(new Event('resize'));
+      };
+      splitHandle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startX = e.clientX;
+        startW = agentPane.getBoundingClientRect().width;
+        splitHandle.classList.add('active');
+        document.body.classList.add('resizing-col');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+  }
+
+  private addTerminalTab(container: HTMLElement, id: string, label: string): void {
+    // Insert before the + and split buttons (last two children)
+    const tab = document.createElement('div');
+    tab.className = 'term-tab';
+    tab.dataset['id'] = id;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'term-tab-label';
+    labelSpan.textContent = label;
+    // Double-click to rename
+    labelSpan.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      labelSpan.contentEditable = 'true';
+      labelSpan.focus();
+      // Select all
+      const range = document.createRange();
+      range.selectNodeContents(labelSpan);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+    });
+    labelSpan.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); labelSpan.blur(); }
+    });
+    labelSpan.addEventListener('blur', () => {
+      labelSpan.contentEditable = 'false';
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'term-tab-close';
+    closeBtn.title = 'Close';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Remove pane
+      document.getElementById(`terminal-pane-${id}`)?.remove();
+      this.shellTerminals.delete(id);
+      tab.remove();
+      // Switch back to agent tab
+      this.setActiveTerminalTab('agent');
+    });
+
+    tab.appendChild(labelSpan);
+    tab.appendChild(closeBtn);
+
+    // Insert before the last two buttons (+, ⊞)
+    const btnAdd = document.getElementById('btn-add-terminal')!;
+    container.insertBefore(tab, btnAdd);
+  }
+
+  private setActiveTerminalTab(id: string): void {
+    // Update tab highlight
+    document.querySelectorAll('#terminal-tabs .term-tab').forEach(t => {
+      (t as HTMLElement).classList.toggle('active', (t as HTMLElement).dataset['id'] === id);
+    });
+
+    // Show/hide panes (only non-split panes)
+    document.querySelectorAll('#terminal-panes .term-pane:not(#terminal-pane-split)').forEach(p => {
+      const el = p as HTMLElement;
+      el.classList.toggle('active', el.id === `terminal-pane-${id}`);
+    });
+
+    // Fire resize so xterm recalculates
+    window.dispatchEvent(new Event('resize'));
   }
 
   private initHResize(handleId: string, targetId: string, side: 'before' | 'after', min: number, max: number): void {
@@ -341,7 +521,7 @@ export class UIManager {
     overlay.querySelector('#btn-binary-download')!.addEventListener('click', async () => {
       try {
         const buffer = await this.container.readFileBuffer(fullPath);
-        const blob = new Blob([buffer]);
+        const blob = new Blob([buffer as unknown as BlobPart]);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -967,6 +1147,16 @@ export class UIManager {
       await this.container.cloneRepo(url, token);
       document.getElementById('btn-sync')!.removeAttribute('disabled');
       this.refreshFileTree();
+
+      // Automatically open README.md if it exists to give visual feedback
+      const files = await this.container.listWorkspaceFiles();
+      const readme = files.find(f => f.toLowerCase() === 'readme.md');
+      if (readme) {
+        this.openFile(readme, readme.split('/').pop() ?? readme);
+      } else {
+        const firstFile = files.find(f => !f.endsWith('/'));
+        if (firstFile) this.openFile(firstFile, firstFile.split('/').pop() ?? firstFile);
+      }
     } catch (e) {
       alert(`Clone failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

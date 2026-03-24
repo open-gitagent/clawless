@@ -285,6 +285,11 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     return this._container.exec(cmd);
   }
 
+  /** Spawn a dynamic interactive jsh shell in the container. Called by UIManager when user clicks +. */
+  async spawnShell(id: string, terminal: TerminalManager): Promise<void> {
+    return this._container.spawnShell(id, terminal);
+  }
+
   /** Open a raw interactive shell. */
   async shell(): Promise<void> {
     await this._container.startShell(this._terminal);
