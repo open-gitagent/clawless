@@ -141,8 +141,8 @@ export class WasmEngine {
   }
 
   dispose(): void {
-    this.ctx?.dispose();
-    this.rt?.dispose();
+    try { this.ctx?.dispose(); } catch { /* QuickJS GC cleanup — non-fatal */ }
+    try { this.rt?.dispose(); } catch { /* QuickJS GC cleanup — non-fatal */ }
     this.ctx = null;
     this.rt = null;
   }

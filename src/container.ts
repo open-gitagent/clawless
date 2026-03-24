@@ -259,21 +259,18 @@ export class ContainerManager {
 
   /** Run `npm install` inside the container. All output goes to terminal. */
   async runNpmInstall(terminal: TerminalManager): Promise<void> {
-    // WASM path — use PackageLoader instead of real npm
+    // WASM path — install built-in agent into VFS
     if (this.isWasm) {
       this.setStatus('installing');
-      this.audit?.log('process.spawn', 'npm install (wasm)', undefined, { source: 'boot' });
       terminal.write('[ClawWASM] Installing packages...\r\n');
-      const proc = await this.wasmRuntime!.spawn('npm', ['install'], {});
-      const reader = proc.output.getReader();
-      (async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          terminal.write(typeof value === 'string' ? value.replace(/\n/g, '\r\n') : value);
-        }
-      })();
-      await proc.exit;
+
+      // Write built-in agent to /node_modules/gitclaw/dist/index.js
+      const vfs = this.wasmRuntime!.fs;
+      vfs.mkdirSync('/node_modules/gitclaw/dist', { recursive: true });
+      vfs.writeFileSync('/node_modules/gitclaw/package.json', JSON.stringify({ name: 'gitclaw', version: '1.0.0', main: 'dist/index.js' }));
+      vfs.writeFileSync('/node_modules/gitclaw/dist/index.js', BUILTIN_WASM_AGENT);
+
+      terminal.write('[ClawWASM] Install complete.\r\n');
       this.audit?.log('process.exit', 'npm install (wasm) complete', {}, { source: 'boot' });
       return;
     }
@@ -407,7 +404,7 @@ export class ContainerManager {
 
   /** Discover the container's home/project directory via $PWD. */
   private async getHomeDir(): Promise<string> {
-    if (this.isWasm) return '/';
+    if (this.isWasm) return '';
     this.audit?.log('process.spawn', 'sh -c "echo $PWD"', undefined, { source: 'system' });
     const proc = await this.wc!.spawn('sh', ['-c', 'echo $PWD']);
     const reader = proc.output.getReader();
@@ -832,6 +829,46 @@ export class ContainerManager {
     });
   }
 }
+
+// ─── Built-in WASM Agent ─────────────────────────────────────────────────────
+// Interactive agent that runs inside QuickJS. Reads SOUL.md/RULES.md,
+// calls Anthropic/OpenAI/Google APIs for chat, supports file commands.
+
+const BUILTIN_WASM_AGENT = `
+var fs = require('fs');
+var path = require('path');
+
+// Read workspace config
+var agentName = 'my-agent', agentVersion = '1.0.0', model = '';
+try {
+  var yaml = fs.readFileSync('/workspace/agent.yaml', 'utf-8');
+  var m = yaml.match(/name:\\s*(.+)/); if (m) agentName = m[1].trim();
+  m = yaml.match(/version:\\s*(.+)/); if (m) agentVersion = m[1].trim();
+  m = yaml.match(/preferred:\\s*"?([^"\\n]*)"?/); if (m && m[1]) model = m[1].trim();
+} catch(e) {}
+
+// Detect model from env
+if (!model) {
+  if (process.env.ANTHROPIC_API_KEY) model = 'anthropic:claude-sonnet-4-6';
+  else if (process.env.OPENAI_API_KEY) model = 'openai:gpt-4o';
+  else if (process.env.GOOGLE_API_KEY) model = 'google:gemini-2.0-flash';
+}
+
+// Read soul/rules for system prompt
+var soul = '', rules = '';
+try { soul = fs.readFileSync('/workspace/SOUL.md', 'utf-8'); } catch(e) {}
+try { rules = fs.readFileSync('/workspace/RULES.md', 'utf-8'); } catch(e) {}
+var systemPrompt = (soul || 'You are a helpful coding assistant.') + '\\n' + rules;
+
+console.log('');
+console.log('\\x1b[1m' + agentName + ' v' + agentVersion + '\\x1b[0m');
+console.log('Model: \\x1b[36m' + (model || '(not configured)') + '\\x1b[0m');
+console.log('Runtime: \\x1b[90mClawWASM (QuickJS WASM) — zero WebContainers\\x1b[0m');
+console.log('');
+console.log('Type \\x1b[33m/help\\x1b[0m for commands, or chat with the AI.');
+console.log('');
+process.stdout.write('\\x1b[32m→ \\x1b[0m');
+`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

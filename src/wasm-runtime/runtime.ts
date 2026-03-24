@@ -118,7 +118,7 @@ export class ClawWASMRuntime {
           exitCode = 1;
         }
 
-        engine.dispose();
+        try { engine.dispose(); } catch { /* ok */ }
         await outputWriter.close();
         exitResolve!(exitCode);
       } catch (e) {
