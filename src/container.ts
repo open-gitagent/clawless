@@ -30,6 +30,7 @@ export class ContainerManager {
   private audit: AuditLog | null = null;
   private policy: PolicyEngine | null = null;
   private activeProcessCount = 0;
+  private onDataDisposable: { dispose(): void } | null = null;
   private outputLineBuf = '';
   private outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private gitService: GitService | null = null;
@@ -391,7 +392,8 @@ export class ContainerManager {
 
     // Wire keystrokes directly to gitclaw stdin (no jsh in between)
     this.shellWriter = this.shellProcess.input.getWriter();
-    terminal.onData((data) => {
+    this.onDataDisposable?.dispose();
+    this.onDataDisposable = terminal.onData((data) => {
       this.shellWriter?.write(data);
       this.audit?.logStdin(data);
     });
@@ -440,7 +442,8 @@ export class ContainerManager {
     );
 
     this.shellWriter = this.shellProcess.input.getWriter();
-    terminal.onData((data) => {
+    this.onDataDisposable?.dispose();
+    this.onDataDisposable = terminal.onData((data) => {
       this.shellWriter?.write(data);
       this.audit?.logStdin(data);
     });
@@ -620,7 +623,8 @@ export class ContainerManager {
     );
 
     this.shellWriter = this.shellProcess.input.getWriter();
-    terminal.onData((data) => {
+    this.onDataDisposable?.dispose();
+    this.onDataDisposable = terminal.onData((data) => {
       this.shellWriter?.write(data);
       this.audit?.logStdin(data);
     });
