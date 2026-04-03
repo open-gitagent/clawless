@@ -5,6 +5,7 @@ export class TerminalManager {
   readonly xterm: Terminal;
   private readonly fitAddon: FitAddon;
   private resizeObserver: ResizeObserver | null = null;
+  private dataHandler: ((data: string) => void) | null = null;
 
   constructor() {
     this.xterm = new Terminal({
@@ -39,6 +40,11 @@ export class TerminalManager {
 
     this.fitAddon = new FitAddon();
     this.xterm.loadAddon(this.fitAddon);
+
+    // Register onData once in constructor to prevent duplicate handlers on restart
+    this.xterm.onData((data: string) => {
+      this.dataHandler?.(data);
+    });
   }
 
   /** Mount the terminal into a DOM element and start auto-resize. */
@@ -61,9 +67,11 @@ export class TerminalManager {
     this.xterm.write(data);
   }
 
-  /** Register a handler for user keystrokes (sent to shell stdin). */
+  /** Register a handler for user keystrokes (sent to shell stdin).
+   * Only one handler can be registered at a time; subsequent calls replace the previous handler.
+   */
   onData(handler: (data: string) => void): void {
-    this.xterm.onData(handler);
+    this.dataHandler = handler;
   }
 
   /** Current terminal dimensions for pty resize. */
