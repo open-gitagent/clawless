@@ -26,8 +26,11 @@ export const GITCLAW_TEMPLATE: ContainerTemplate = {
   },
 };
 
-/** Native deps that cannot run inside WebContainer's WASM sandbox. */
-const OPENCLAW_NATIVE_OVERRIDES: Record<string, string> = {
+/**
+ * Native / git-sourced deps that cannot run inside WebContainer's WASM sandbox
+ * or Nodepod's registry-only installer. Stubbed with `is-number@7.0.0`.
+ */
+export const NATIVE_DEP_OVERRIDES: Record<string, string> = {
   'sharp': 'npm:is-number@7.0.0',
   'playwright-core': 'npm:is-number@7.0.0',
   '@lydell/node-pty': 'npm:is-number@7.0.0',
@@ -35,8 +38,10 @@ const OPENCLAW_NATIVE_OVERRIDES: Record<string, string> = {
   'node-llama-cpp': 'npm:is-number@7.0.0',
   '@napi-rs/canvas': 'npm:is-number@7.0.0',
   'pdfjs-dist': 'npm:is-number@7.0.0',
-  // baileys' libsignal dep uses a git-SSH URL unreachable in WebContainer
+  // baileys' libsignal dep uses a git-SSH URL unreachable in WebContainer / Nodepod
   'libsignal': 'npm:is-number@7.0.0',
+  // baileys itself is git-sourced in some versions; stub it out entirely
+  'baileys': 'npm:is-number@7.0.0',
 };
 
 /** Built-in openclaw template — OpenClaw personal AI agent in WebContainer. */
@@ -54,7 +59,7 @@ export const OPENCLAW_TEMPLATE: ContainerTemplate = {
       OPENCLAW_DISABLE_BONJOUR: '1',
       OPENCLAW_GATEWAY_TOKEN: 'clawless-local-token',
     },
-    overrides: OPENCLAW_NATIVE_OVERRIDES,
+    overrides: NATIVE_DEP_OVERRIDES,
   },
   startupScript: 'node ../openclaw-setup.cjs',
   workspace: {

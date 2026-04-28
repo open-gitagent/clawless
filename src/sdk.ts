@@ -2,7 +2,9 @@
 
 import type { WebContainer } from '@webcontainer/api';
 import { TerminalManager } from './terminal.js';
-import { ContainerManager } from './container.js';
+import { WebContainerRuntime } from './container.js';
+import { NodepodRuntime } from './nodepod-runtime.js';
+import type { IRuntime } from './runtime.js';
 import { UIManager } from './ui.js';
 import { AuditLog, type AuditEntry, type AuditSource, type AuditLevel, type AuditEvent } from './audit.js';
 import { PolicyEngine } from './policy.js';
@@ -48,7 +50,7 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
   }
 
   // ─── Instance ────────────────────────────────────────────────────────────
-  private _container: ContainerManager;
+  private _container: IRuntime;
   private _terminal: TerminalManager;
   private _ui: UIManager;
   private _audit: AuditLog;
@@ -65,7 +67,9 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     this._options = options ?? {};
 
     this._terminal = new TerminalManager();
-    this._container = new ContainerManager();
+    this._container = options?.runtime === 'nodepod'
+      ? new NodepodRuntime()
+      : new WebContainerRuntime();
     this._audit = new AuditLog();
     this._policy = new PolicyEngine();
     this._plugins = new PluginManager();
@@ -101,9 +105,15 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
 
   // ─── Public getters ───────────────────────────────────────────────────────
 
-  /** Raw WebContainer instance for direct access. */
+  /** Raw WebContainer instance for direct access. Null when using the nodepod runtime — use `cc.runtime` for the underlying instance. */
   get container(): WebContainer | null {
-    return this._container.getWebContainer();
+    const raw = this._container.getRawRuntime();
+    return this._container instanceof WebContainerRuntime ? (raw as WebContainer | null) : null;
+  }
+
+  /** The raw runtime instance (WebContainer or Nodepod) for advanced usage. */
+  get runtime(): unknown {
+    return this._container.getRawRuntime();
   }
 
   /** Terminal manager instance. */
@@ -157,7 +167,8 @@ export class ClawContainer extends TypedEventEmitter<ClawContainerEvents> implem
     const resolvedAgent = opts.agent !== false ? opts.agent as AgentConfig | undefined : undefined;
 
     // Step 1: Boot
-    this._terminal.write('\x1b[90m[ClawLess] Booting WebContainer…\x1b[0m\r\n');
+    const runtimeLabel = this._options.runtime === 'nodepod' ? 'Nodepod' : 'WebContainer';
+    this._terminal.write(`\x1b[90m[ClawLess] Booting ${runtimeLabel}…\x1b[0m\r\n`);
     this._audit.log('status.change', 'boot sequence started', undefined, { source: 'boot' });
 
     try {

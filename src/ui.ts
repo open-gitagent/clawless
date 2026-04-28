@@ -1,4 +1,4 @@
-import type { ContainerManager, ContainerStatus } from './container.js';
+import type { IRuntime, ContainerStatus } from './runtime.js';
 import { createEditorInstance, openFileModel, getModelContent, closeFileModel, disposeAll, initMonacoTheme } from './monaco-editor.js';
 import type { AuditLog } from './audit.js';
 import { PolicyEngine } from './policy.js';
@@ -32,7 +32,7 @@ interface Tab {
 }
 
 export class UIManager {
-  private container: ContainerManager;
+  private container: IRuntime;
   private audit: AuditLog;
   private policy: PolicyEngine;
   private activePanelId: string | null = null;
@@ -53,7 +53,7 @@ export class UIManager {
   // Custom tab tracking
   private customTabPaths = new Set<string>();
 
-  constructor(container: ContainerManager, audit: AuditLog, policy: PolicyEngine) {
+  constructor(container: IRuntime, audit: AuditLog, policy: PolicyEngine) {
     this.container = container;
     this.audit = audit;
     this.policy = policy;

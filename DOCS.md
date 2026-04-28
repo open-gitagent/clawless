@@ -63,8 +63,14 @@ interface ClawContainerOptions {
   template?: string | ContainerTemplate;
   plugins?: ClawContainerPlugin[];
   tabs?: TabDefinition[];
+  runtime?: 'webcontainer' | 'nodepod';  // default: 'webcontainer'
 }
 ```
+
+**Runtime backends:**
+
+- `'webcontainer'` (default): StackBlitz WebContainers (WASM Linux userspace). Best compatibility, requires COOP/COEP headers, 2–5 s cold start.
+- `'nodepod'`: [@scelar/nodepod](https://github.com/ScelarOrg/Nodepod) (Web Workers + Node polyfills). MIT + Commons Clause, ~100 ms cold start, no COOP/COEP requirement. Vite users must add `nodepod()` to plugins.
 
 **Lifecycle Methods:**
 

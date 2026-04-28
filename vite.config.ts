@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import monacoEditorPlugin from 'vite-plugin-monaco-editor';
+import nodepod from '@scelar/nodepod/vite';
 
 export default defineConfig(({ mode }) => {
   const isLib = mode === 'lib';
@@ -9,6 +10,7 @@ export default defineConfig(({ mode }) => {
       (monacoEditorPlugin as any).default({
         languageWorkers: ['editorWorkerService', 'json', 'css', 'html', 'typescript'],
       }),
+      nodepod(),
     ],
     server: {
       headers: {
@@ -30,6 +32,9 @@ export default defineConfig(({ mode }) => {
         'Cross-Origin-Opener-Policy': 'same-origin',
       },
     },
+    css: {
+      postcss: { plugins: [] },
+    },
     build: isLib
       ? {
           target: 'esnext',
@@ -39,7 +44,7 @@ export default defineConfig(({ mode }) => {
             fileName: 'sdk',
           },
           rollupOptions: {
-            external: ['@webcontainer/api', '@xterm/xterm', '@xterm/addon-fit', 'monaco-editor'],
+            external: ['@webcontainer/api', '@scelar/nodepod', '@xterm/xterm', '@xterm/addon-fit', 'monaco-editor'],
           },
         }
       : {

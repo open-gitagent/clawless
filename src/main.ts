@@ -34,7 +34,12 @@ async function boot() {
   if (status) status.style.display = '';
   if (progressBar) progressBar.style.display = '';
 
-  const cc = new ClawContainer('#app', { template });
+  // Default to WebContainer runtime — interactive agents (gitclaw/openclaw)
+  // need a real PTY for readline, which @scelar/nodepod doesn't ship.
+  // Pass `?runtime=nodepod` to opt into the Nodepod runtime for comparison.
+  const params = new URLSearchParams(location.search);
+  const runtime = params.get('runtime') === 'nodepod' ? 'nodepod' : 'webcontainer';
+  const cc = new ClawContainer('#app', { template, runtime });
   cc.start().catch(console.error);
 
   // Expose SDK globally for console access and external scripts

@@ -6,16 +6,11 @@ import { NETWORK_HOOK_CJS } from './network-hook.js';
 import { PolicyEngine, PolicyDeniedError, type PolicyAction } from './policy.js';
 import { GitService, type GitFile } from './git-service.js';
 import type { AgentConfig } from './types.js';
+import type { IRuntime, ContainerStatus, ContainerEnv, BootOptions } from './runtime.js';
 
-export type ContainerStatus = 'booting' | 'installing' | 'ready' | 'error';
+export type { ContainerStatus, ContainerEnv } from './runtime.js';
 
-export interface ContainerEnv {
-  provider: string;
-  model: string;
-  envVars: Record<string, string>;
-}
-
-export class ContainerManager {
+export class WebContainerRuntime implements IRuntime {
   private wc: WebContainer | null = null;
   private shellProcess: WebContainerProcess | null = null;
   private shellWriter: WritableStreamDefaultWriter<string> | null = null;
@@ -145,13 +140,7 @@ export class ContainerManager {
   }
 
   /** Boot the WebContainer and mount all workspace files. */
-  async boot(opts?: {
-    workspace?: Record<string, string>;
-    services?: Record<string, string>;
-    agentPackage?: string;
-    agentVersion?: string;
-    agentOverrides?: Record<string, string>;
-  }): Promise<void> {
+  async boot(opts?: BootOptions): Promise<void> {
     this.setStatus('booting');
     this.wc = await WebContainer.boot();
 
@@ -579,6 +568,9 @@ export class ContainerManager {
   /** Expose the raw WebContainer instance for direct user access. */
   getWebContainer(): WebContainer | null { return this.wc; }
 
+  /** IRuntime escape hatch — returns the raw runtime instance. */
+  getRawRuntime(): unknown { return this.wc; }
+
   /** Launch a generic agent process with PTY, similar to startGitclaw(). */
   async startAgent(config: AgentConfig, terminal: TerminalManager): Promise<void> {
     if (!this.wc) throw new Error('Container not booted');
@@ -721,6 +713,9 @@ export class ContainerManager {
     });
   }
 }
+
+/** @deprecated Use `WebContainerRuntime`. Kept for backwards compatibility. */
+export { WebContainerRuntime as ContainerManager };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

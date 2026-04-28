@@ -38,6 +38,8 @@ export interface ClawContainerOptions {
   plugins?: ClawContainerPlugin[];
   /** Custom tabs to add on start */
   tabs?: TabDefinition[];
+  /** Runtime backend. Default: 'webcontainer' (StackBlitz WASM). 'nodepod' uses @scelar/nodepod (Web Workers). */
+  runtime?: 'webcontainer' | 'nodepod';
 }
 
 /** Definition for a custom UI tab. */

@@ -122,6 +122,30 @@ await cc.start();
 cc.on('ready', () => console.log('Container ready!'));
 ```
 
+### Runtime selection
+
+ClawLess supports two browser runtimes. Default is **WebContainers** (StackBlitz WASM). You can opt into **[Nodepod](https://github.com/ScelarOrg/Nodepod)** — an MIT + Commons-Clause runtime built on Web Workers — via the `runtime` option:
+
+```typescript
+const cc = new ClawContainer('#app', {
+  runtime: 'nodepod',
+  template: 'gitclaw',
+});
+```
+
+Nodepod boots much faster (~100 ms vs 2–5 s) and doesn't require COOP/COEP headers, but **does not provide a PTY**. That means:
+
+- **Works well on Nodepod:** `cc.fs.*`, `cc.zip.*`, `cc.git.*`, `cc.exec(cmd)`, non-interactive scripts, HTTP servers via `np.port(...)`.
+- **Needs WebContainers:** interactive CLIs built on `readline` or prompt libraries (like `gitclaw` and `openclaw`), anything that depends on proper terminal line-editing.
+
+Vite users also need to register the Service Worker plugin in `vite.config.ts`:
+
+```typescript
+import nodepod from '@scelar/nodepod/vite';
+
+export default defineConfig({ plugins: [nodepod()] });
+```
+
 ## Architecture
 
 | Component | Role |
