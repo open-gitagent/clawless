@@ -512,10 +512,12 @@ export class ContainerManager {
     window.addEventListener('resize', resizeHandler);
 
     proc.exit.then((code) => {
+      const exitCode = Number(code);
+      if (!this.shellProcesses.has(id)) return;
       this.activeProcessCount--;
-      this.audit?.log('process.exit', `/bin/jsh (shell:${id}) exited ${code}`, { exitCode: code }, { source: 'user' });
+      this.audit?.log('process.exit', `/bin/jsh (shell:${id}) exited ${exitCode}`, { exitCode }, { source: 'user' });
       this._cleanupShellListeners(id);
-    });
+    }).catch(() => {});
   }
 
   /** Remove the resize listener and onData disposable for a dynamic shell. */
@@ -537,7 +539,14 @@ export class ContainerManager {
 
   /** Kill a dynamic shell and immediately release its listeners. */
   killShell(id: string): void {
-    // Stop routing keystrokes immediately
+    const proc = this.shellProcesses.get(id);
+    if (!proc) return;
+
+    // Mark as gone before kill() so the exit handler's sentinel check short-circuits
+    this.shellProcesses.delete(id);
+    this.activeProcessCount--;
+    this.audit?.log('process.exit', `/bin/jsh (shell:${id}) killed`, { exitCode: -1 }, { source: 'user' });
+
     this.shellOnDataDisposables.get(id)?.dispose();
     this.shellOnDataDisposables.delete(id);
 
@@ -547,8 +556,13 @@ export class ContainerManager {
       this.shellResizeHandlers.delete(id);
     }
 
-    // kill() resolves the exit promise, which handles activeProcessCount and map cleanup
-    this.shellProcesses.get(id)?.kill();
+    const writer = this.shellWriters.get(id);
+    if (writer) {
+      writer.close().catch(() => {});
+      this.shellWriters.delete(id);
+    }
+
+    proc.kill();
   }
 
   async sendToShell(command: string): Promise<void> {
