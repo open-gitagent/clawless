@@ -1,4 +1,5 @@
 import type { ContainerManager, ContainerStatus } from './container.js';
+import { TerminalManager } from './terminal.js';
 import { createEditorInstance, openFileModel, getModelContent, closeFileModel, disposeAll, initMonacoTheme } from './monaco-editor.js';
 import type { AuditLog } from './audit.js';
 import { PolicyEngine } from './policy.js';
@@ -38,6 +39,10 @@ export class UIManager {
   private activePanelId: string | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Dynamic terminal tab state
+  private shellTerminals = new Map<string, TerminalManager>(); // id → TerminalManager
+  private shellCounter = 0;
+
   // Tab state
   private tabs: Tab[] = [];
   private activeTabPath: string | null = null;
@@ -67,6 +72,7 @@ export class UIManager {
     this.bindFileTree();
     this.bindKeyboard();
     this.bindResizeHandles();
+    this.bindTerminalTabs();
     this.populateModelOptions();
     this.restoreConfig();
     this.bindRepoControls();
@@ -161,6 +167,187 @@ export class UIManager {
 
     // Main-content ↔ sidebar (horizontal)
     this.initHResize('resize-sidebar', 'sidebar', 'after', 150, 600);
+  }
+
+  private bindTerminalTabs(): void {
+    const panesContainer = document.getElementById('terminal-panes')!;
+    const tabsContainer = document.getElementById('terminal-tabs')!;
+    const btnAdd = document.getElementById('btn-add-terminal')!;
+    const btnSplit = document.getElementById('btn-split-terminal')!;
+    const agentPane = document.getElementById('terminal-pane-agent')!;
+
+    // ── Activate agent tab initially ────────────────────────────────────
+    this.setActiveTerminalTab('agent');
+
+    // Clicking the agent pane focuses it
+    agentPane.addEventListener('click', () => this.setActiveTerminalTab('agent'));
+
+    // ── Tab click delegation ─────────────────────────────────────────────
+    tabsContainer.addEventListener('click', (e) => {
+      const tab = (e.target as HTMLElement).closest('.term-tab') as HTMLElement | null;
+      if (!tab) return;
+      if ((e.target as HTMLElement).classList.contains('term-tab-close')) return;
+      this.setActiveTerminalTab(tab.dataset['id']!);
+    });
+
+    // ── Add new terminal (shared logic for + and ⊞) ──────────────────────
+    const addTerminal = () => {
+      this.shellCounter++;
+      const id = `shell-${this.shellCounter}`;
+      const label = `Terminal ${this.shellCounter}`;
+
+      const tm = new TerminalManager();
+      this.shellTerminals.set(id, tm);
+
+      // Build pane
+      const pane = document.createElement('div');
+      pane.className = 'term-pane';
+      pane.id = `terminal-pane-${id}`;
+      pane.addEventListener('click', () => this.setActiveTerminalTab(id));
+      const inner = document.createElement('div');
+      inner.className = 'term-pane-inner';
+      inner.id = `terminal-container-${id}`;
+      pane.appendChild(inner);
+
+      // Insert resize handle before the new pane if there are existing panes
+      if (panesContainer.querySelectorAll('.term-pane').length > 0) {
+        panesContainer.appendChild(this.createPaneResizeHandle());
+      }
+      panesContainer.appendChild(pane);
+
+      tm.mount(inner);
+
+      this.container.spawnShell(id, tm).catch(err => {
+        tm.write(`\r\n\x1b[31m[Error] ${err.message}\x1b[0m\r\n`);
+      });
+
+      this.addTerminalTab(tabsContainer, id, label);
+      this.setActiveTerminalTab(id);
+    };
+
+    btnAdd.addEventListener('click', addTerminal);
+    btnSplit.addEventListener('click', addTerminal);
+  }
+
+  /** Create a draggable resize handle between two adjacent panes. */
+  private createPaneResizeHandle(): HTMLElement {
+    const handle = document.createElement('div');
+    handle.className = 'resize-handle resize-h';
+    const min = 150;
+
+    const onMove = (e: MouseEvent, leftPane: HTMLElement, rightPane: HTMLElement,
+                    startX: number, startLW: number, startRW: number) => {
+      const delta = e.clientX - startX;
+      leftPane.style.flex = `0 0 ${Math.max(min, startLW + delta)}px`;
+      rightPane.style.flex = `0 0 ${Math.max(min, startRW - delta)}px`;
+    };
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const leftPane = handle.previousElementSibling as HTMLElement;
+      const rightPane = handle.nextElementSibling as HTMLElement;
+      if (!leftPane || !rightPane) return;
+      const startX = e.clientX;
+      const startLW = leftPane.getBoundingClientRect().width;
+      const startRW = rightPane.getBoundingClientRect().width;
+      document.body.classList.add('resizing-col');
+
+      const onMoveH = (ev: MouseEvent) => onMove(ev, leftPane, rightPane, startX, startLW, startRW);
+      const onUp = () => {
+        document.body.classList.remove('resizing-col');
+        document.removeEventListener('mousemove', onMoveH);
+        document.removeEventListener('mouseup', onUp);
+        window.dispatchEvent(new Event('resize'));
+      };
+      document.addEventListener('mousemove', onMoveH);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    return handle;
+  }
+
+  private addTerminalTab(container: HTMLElement, id: string, label: string): void {
+    // Insert before the + and split buttons (last two children)
+    const tab = document.createElement('div');
+    tab.className = 'term-tab';
+    tab.dataset['id'] = id;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'term-tab-label';
+    labelSpan.textContent = label;
+    // Double-click to rename
+    labelSpan.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      labelSpan.contentEditable = 'true';
+      labelSpan.focus();
+      // Select all
+      const range = document.createRange();
+      range.selectNodeContents(labelSpan);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+    });
+    labelSpan.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); labelSpan.blur(); }
+    });
+    labelSpan.addEventListener('blur', () => {
+      labelSpan.contentEditable = 'false';
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'term-tab-close';
+    closeBtn.title = 'Close';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.container.killShell(id);
+
+      // Remove the pane and its adjacent resize handle
+      const pane = document.getElementById(`terminal-pane-${id}`);
+      if (pane) {
+        const prev = pane.previousElementSibling;
+        const next = pane.nextElementSibling;
+        if (prev?.classList.contains('resize-handle')) {
+          prev.remove();
+        } else if (next?.classList.contains('resize-handle')) {
+          next.remove();
+        }
+        pane.remove();
+      }
+
+      // Reset remaining panes to equal flex so they re-tile evenly
+      document.querySelectorAll('#terminal-panes .term-pane').forEach(p => {
+        (p as HTMLElement).style.flex = '1';
+      });
+
+      this.shellTerminals.get(id)?.dispose();
+      this.shellTerminals.delete(id);
+      tab.remove();
+      this.setActiveTerminalTab('agent');
+    });
+
+    tab.appendChild(labelSpan);
+    tab.appendChild(closeBtn);
+
+    // Insert before the last two buttons (+, ⊞)
+    const btnAdd = document.getElementById('btn-add-terminal')!;
+    container.insertBefore(tab, btnAdd);
+  }
+
+  private setActiveTerminalTab(id: string): void {
+    // Tab bar highlight
+    document.querySelectorAll('#terminal-tabs .term-tab').forEach(t => {
+      (t as HTMLElement).classList.toggle('active', (t as HTMLElement).dataset['id'] === id);
+    });
+
+    // Pane focus border — all panes stay visible; only the focused one gets the outline
+    document.querySelectorAll('#terminal-panes .term-pane').forEach(p => {
+      (p as HTMLElement).classList.toggle('pane-focused', (p as HTMLElement).id === `terminal-pane-${id}`);
+    });
+
+    // Route keyboard focus to the right xterm instance
+    this.shellTerminals.get(id)?.xterm.focus();
+
+    window.dispatchEvent(new Event('resize'));
   }
 
   private initHResize(handleId: string, targetId: string, side: 'before' | 'after', min: number, max: number): void {
@@ -341,7 +528,7 @@ export class UIManager {
     overlay.querySelector('#btn-binary-download')!.addEventListener('click', async () => {
       try {
         const buffer = await this.container.readFileBuffer(fullPath);
-        const blob = new Blob([buffer]);
+        const blob = new Blob([buffer as unknown as BlobPart]);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -967,6 +1154,16 @@ export class UIManager {
       await this.container.cloneRepo(url, token);
       document.getElementById('btn-sync')!.removeAttribute('disabled');
       this.refreshFileTree();
+
+      // Automatically open README.md if it exists to give visual feedback
+      const files = await this.container.listWorkspaceFiles();
+      const readme = files.find(f => f.toLowerCase() === 'readme.md');
+      if (readme) {
+        this.openFile(readme, readme.split('/').pop() ?? readme);
+      } else {
+        const firstFile = files.find(f => !f.endsWith('/'));
+        if (firstFile) this.openFile(firstFile, firstFile.split('/').pop() ?? firstFile);
+      }
     } catch (e) {
       alert(`Clone failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

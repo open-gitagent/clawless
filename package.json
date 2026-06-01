@@ -25,6 +25,7 @@
     "monaco-editor": "^0.55.1"
   },
   "devDependencies": {
+    "esbuild": "^0.27.4",
     "typescript": "^5.4.0",
     "vite": "^5.2.0",
     "vite-plugin-monaco-editor": "^1.1.0"

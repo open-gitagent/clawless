@@ -19,6 +19,11 @@ export class ContainerManager {
   private wc: WebContainer | null = null;
   private shellProcess: WebContainerProcess | null = null;
   private shellWriter: WritableStreamDefaultWriter<string> | null = null;
+  // Map of dynamic shell id → process/writer/listeners
+  private shellProcesses = new Map<string, WebContainerProcess>();
+  private shellWriters = new Map<string, WritableStreamDefaultWriter<string>>();
+  private shellOnDataDisposables = new Map<string, { dispose(): void }>();
+  private shellResizeHandlers = new Map<string, () => void>();
   private _status: ContainerStatus = 'booting';
   private onStatusChange?: (s: ContainerStatus) => void;
 
@@ -445,7 +450,8 @@ export class ContainerManager {
       this.audit?.logStdin(data);
     });
 
-    await this.shellWriter.write('cd workspace\nclear\n');
+    await this.shellWriter.write('cd workspace\n');
+    terminal.write('\x1b[2J\x1b[H'); // erase screen directly — avoids jsh exitCode crash on clear(1)
     window.addEventListener('resize', () => this.resizeShell(terminal));
   }
 
@@ -453,6 +459,112 @@ export class ContainerManager {
     if (!this.shellProcess) return;
     const { cols, rows } = terminal.dimensions;
     this.shellProcess.resize({ cols, rows });
+  }
+
+
+  /** Spawn an independent interactive jsh shell identified by `id`. */
+  async spawnShell(id: string, terminal: TerminalManager): Promise<void> {
+    if (!this.wc) throw new Error('Container not booted');
+
+    const { cols, rows } = terminal.dimensions;
+    const homeDir = await this.getHomeDir();
+
+    this.enforcePolicy('process.spawn', '/bin/jsh --osc', { activeProcesses: this.activeProcessCount });
+    this.audit?.log('process.spawn', `/bin/jsh --osc (shell:${id})`, undefined, { source: 'user' });
+    this.activeProcessCount++;
+
+    const proc = await this.wc.spawn('/bin/jsh', ['--osc'], {
+      terminal: { cols, rows },
+      env: {
+        ...this.apiEnvVars,
+        PATH: `${homeDir}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+        HOME: homeDir,
+        NODE_OPTIONS: `--require ${homeDir}/network-hook.cjs`,
+      },
+    });
+
+    this.shellProcesses.set(id, proc);
+
+    proc.output.pipeTo(
+      new WritableStream({
+        write: (chunk) => {
+          this.processOutputChunk(chunk, terminal, 'user');
+        },
+      }),
+    ).catch(() => {}); // stream is closed when the process exits; suppress the resulting rejection
+
+    const writer = proc.input.getWriter();
+    this.shellWriters.set(id, writer);
+
+    const onDataDisposable = terminal.onData((data) => {
+      writer.write(data);
+      this.audit?.logStdin(data);
+    });
+    this.shellOnDataDisposables.set(id, onDataDisposable);
+
+    await writer.write('cd workspace\n');
+    terminal.write('\x1b[2J\x1b[H'); // erase screen directly — avoids jsh exitCode crash on clear(1)
+
+    const resizeHandler = () => {
+      if (!this.shellProcesses.has(id)) return;
+      const { cols, rows } = terminal.dimensions;
+      proc.resize({ cols, rows });
+    };
+    this.shellResizeHandlers.set(id, resizeHandler);
+    window.addEventListener('resize', resizeHandler);
+
+    // proc.exit resolves to the plain exit-code number — use it directly
+    proc.exit.then((exitCode) => {
+      if (!this.shellProcesses.has(id)) return;
+      this.activeProcessCount--;
+      this.audit?.log('process.exit', `/bin/jsh (shell:${id}) exited ${exitCode}`, { exitCode }, { source: 'user' });
+      this._cleanupShellListeners(id);
+    }).catch(() => {});
+  }
+
+  /** Remove the resize listener and onData disposable for a dynamic shell. */
+  private _cleanupShellListeners(id: string): void {
+    const resizeHandler = this.shellResizeHandlers.get(id);
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      this.shellResizeHandlers.delete(id);
+    }
+    this.shellOnDataDisposables.get(id)?.dispose();
+    this.shellOnDataDisposables.delete(id);
+    this.shellProcesses.delete(id);
+    const writer = this.shellWriters.get(id);
+    if (writer) {
+      writer.close().catch(() => {});
+      this.shellWriters.delete(id);
+    }
+  }
+
+  /** Kill a dynamic shell and immediately release its listeners. */
+  killShell(id: string): void {
+    const proc = this.shellProcesses.get(id);
+    if (!proc) return;
+
+    // Mark as gone before kill() so the exit handler's sentinel check short-circuits
+    this.shellProcesses.delete(id);
+    this.activeProcessCount--;
+    this.audit?.log('process.exit', `/bin/jsh (shell:${id}) killed`, { exitCode: -1 }, { source: 'user' });
+
+    this.shellOnDataDisposables.get(id)?.dispose();
+    this.shellOnDataDisposables.delete(id);
+
+    const resizeHandler = this.shellResizeHandlers.get(id);
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      this.shellResizeHandlers.delete(id);
+    }
+
+    const writer = this.shellWriters.get(id);
+    if (writer) {
+      writer.close().catch(() => {});
+      this.shellWriters.delete(id);
+    }
+
+    proc.kill();
   }
 
   async sendToShell(command: string): Promise<void> {

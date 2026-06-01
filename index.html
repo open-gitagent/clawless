@@ -132,7 +132,18 @@
           </div>
           <div class="resize-handle resize-v" id="resize-editor-terminal"></div>
           <div id="terminal-panel">
-            <div id="terminal-container"></div>
+            <div id="terminal-tabs">
+              <div class="term-tab active" data-id="agent" role="tab" aria-label="Agent Terminal">
+                <span class="term-tab-label">⚙ Agent</span>
+              </div>
+              <button id="btn-add-terminal" title="New Terminal" aria-label="New Terminal">＋</button>
+              <button id="btn-split-terminal" class="btn-icon" title="Split Terminal" aria-label="Split Terminal">⊞</button>
+            </div>
+            <div id="terminal-panes">
+              <div class="term-pane pane-focused" id="terminal-pane-agent">
+                <div class="term-pane-inner" id="terminal-container"></div>
+              </div>
+            </div>
           </div>
         </div>
 
