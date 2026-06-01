@@ -273,9 +273,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 .term-pane.active { display: flex; }
 .term-pane-inner { flex: 1; min-height: 0; position: relative; }
 
-#terminal-panes.split-active .term-pane.active { display: flex; flex: 1; }
-#terminal-panes.split-active #terminal-pane-split { display: flex !important; flex: 1; }
-#terminal-panes.split-active #resize-terminal-split { display: block; margin: 0 2px; }
+.split-active .term-pane.active { display: flex; flex: 1; }
+.split-active .term-pane-split { display: flex; flex: 1; }
+.split-active .resize-split { display: block; margin: 0 2px; }
 
 .xterm { height: 100%; }
 .xterm-viewport { overflow-y: auto !important; }
