@@ -174,108 +174,96 @@ export class UIManager {
     const tabsContainer = document.getElementById('terminal-tabs')!;
     const btnAdd = document.getElementById('btn-add-terminal')!;
     const btnSplit = document.getElementById('btn-split-terminal')!;
-    const splitPane = document.getElementById('terminal-pane-split')!;
-    const splitHandle = document.getElementById('resize-terminal-split')!;
     const agentPane = document.getElementById('terminal-pane-agent')!;
 
     // ── Activate agent tab initially ────────────────────────────────────
     this.setActiveTerminalTab('agent');
 
+    // Clicking the agent pane focuses it
+    agentPane.addEventListener('click', () => this.setActiveTerminalTab('agent'));
+
     // ── Tab click delegation ─────────────────────────────────────────────
     tabsContainer.addEventListener('click', (e) => {
       const tab = (e.target as HTMLElement).closest('.term-tab') as HTMLElement | null;
       if (!tab) return;
-      const id = tab.dataset['id']!;
-      if ((e.target as HTMLElement).classList.contains('term-tab-close')) {
-        // Don't activate on close
-        return;
-      }
-      this.setActiveTerminalTab(id);
+      if ((e.target as HTMLElement).classList.contains('term-tab-close')) return;
+      this.setActiveTerminalTab(tab.dataset['id']!);
     });
 
-    // ── Add new terminal ─────────────────────────────────────────────────
-    btnAdd.addEventListener('click', () => {
+    // ── Add new terminal (shared logic for + and ⊞) ──────────────────────
+    const addTerminal = () => {
       this.shellCounter++;
       const id = `shell-${this.shellCounter}`;
       const label = `Terminal ${this.shellCounter}`;
 
-      // Create terminal manager
       const tm = new TerminalManager();
       this.shellTerminals.set(id, tm);
 
-      // Create pane
+      // Build pane
       const pane = document.createElement('div');
       pane.className = 'term-pane';
       pane.id = `terminal-pane-${id}`;
+      pane.addEventListener('click', () => this.setActiveTerminalTab(id));
       const inner = document.createElement('div');
       inner.className = 'term-pane-inner';
       inner.id = `terminal-container-${id}`;
       pane.appendChild(inner);
-      // Insert before split-pane
-      panesContainer.insertBefore(pane, splitPane);
 
-      // Mount terminal
+      // Insert resize handle before the new pane if there are existing panes
+      if (panesContainer.querySelectorAll('.term-pane').length > 0) {
+        panesContainer.appendChild(this.createPaneResizeHandle());
+      }
+      panesContainer.appendChild(pane);
+
       tm.mount(inner);
 
-      // Spawn shell in container
       this.container.spawnShell(id, tm).catch(err => {
         tm.write(`\r\n\x1b[31m[Error] ${err.message}\x1b[0m\r\n`);
       });
 
-      // Create tab
       this.addTerminalTab(tabsContainer, id, label);
-
-      // Activate the new tab
       this.setActiveTerminalTab(id);
-    });
+    };
 
-    // ── Split button ─────────────────────────────────────────────────────
-    btnSplit.addEventListener('click', () => {
-      const isSplit = panesContainer.classList.toggle('split-active');
-      if (isSplit) {
-        // Show the Agent pane in the split slot
-        splitPane.innerHTML = '';
-        const cloneContainer = document.createElement('div');
-        cloneContainer.className = 'term-pane-inner';
-        cloneContainer.id = 'terminal-container-split';
-        splitPane.appendChild(cloneContainer);
-        agentPane.style.flex = '1';
-        splitPane.classList.remove('hidden');
-        splitHandle.classList.remove('hidden');
-        // Mount a fresh terminal into the split slot that mirrors agent output
-        // (for simplicity, just show a notice; true mirroring requires piping)
-        cloneContainer.innerHTML = '<div style="padding:8px;color:#8b949e;font-family:monospace;font-size:12px;">Agent terminal view (split)</div>';
-      } else {
-        splitPane.classList.add('hidden');
-        splitHandle.classList.add('hidden');
-      }
-      window.dispatchEvent(new Event('resize'));
-    });
+    btnAdd.addEventListener('click', addTerminal);
+    btnSplit.addEventListener('click', addTerminal);
+  }
 
-    // ── Resize handle for split ──────────────────────────────────────────
-    {
-      let startX = 0, startW = 0;
-      const min = 150;
-      const onMove = (e: MouseEvent) => {
-        agentPane.style.flex = `0 0 ${Math.max(min, startW + e.clientX - startX)}px`;
-      };
+  /** Create a draggable resize handle between two adjacent panes. */
+  private createPaneResizeHandle(): HTMLElement {
+    const handle = document.createElement('div');
+    handle.className = 'resize-handle resize-h';
+    const min = 150;
+
+    const onMove = (e: MouseEvent, leftPane: HTMLElement, rightPane: HTMLElement,
+                    startX: number, startLW: number, startRW: number) => {
+      const delta = e.clientX - startX;
+      leftPane.style.flex = `0 0 ${Math.max(min, startLW + delta)}px`;
+      rightPane.style.flex = `0 0 ${Math.max(min, startRW - delta)}px`;
+    };
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const leftPane = handle.previousElementSibling as HTMLElement;
+      const rightPane = handle.nextElementSibling as HTMLElement;
+      if (!leftPane || !rightPane) return;
+      const startX = e.clientX;
+      const startLW = leftPane.getBoundingClientRect().width;
+      const startRW = rightPane.getBoundingClientRect().width;
+      document.body.classList.add('resizing-col');
+
+      const onMoveH = (ev: MouseEvent) => onMove(ev, leftPane, rightPane, startX, startLW, startRW);
       const onUp = () => {
-        splitHandle.classList.remove('active');
         document.body.classList.remove('resizing-col');
-        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mousemove', onMoveH);
         document.removeEventListener('mouseup', onUp);
         window.dispatchEvent(new Event('resize'));
       };
-      splitHandle.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        startX = e.clientX;
-        startW = agentPane.getBoundingClientRect().width;
-        splitHandle.classList.add('active');
-        document.body.classList.add('resizing-col');
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-    }
+      document.addEventListener('mousemove', onMoveH);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    return handle;
   }
 
   private addTerminalTab(container: HTMLElement, id: string, label: string): void {
@@ -312,7 +300,25 @@ export class UIManager {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.container.killShell(id);
-      document.getElementById(`terminal-pane-${id}`)?.remove();
+
+      // Remove the pane and its adjacent resize handle
+      const pane = document.getElementById(`terminal-pane-${id}`);
+      if (pane) {
+        const prev = pane.previousElementSibling;
+        const next = pane.nextElementSibling;
+        if (prev?.classList.contains('resize-handle')) {
+          prev.remove();
+        } else if (next?.classList.contains('resize-handle')) {
+          next.remove();
+        }
+        pane.remove();
+      }
+
+      // Reset remaining panes to equal flex so they re-tile evenly
+      document.querySelectorAll('#terminal-panes .term-pane').forEach(p => {
+        (p as HTMLElement).style.flex = '1';
+      });
+
       this.shellTerminals.get(id)?.dispose();
       this.shellTerminals.delete(id);
       tab.remove();
@@ -328,18 +334,19 @@ export class UIManager {
   }
 
   private setActiveTerminalTab(id: string): void {
-    // Update tab highlight
+    // Tab bar highlight
     document.querySelectorAll('#terminal-tabs .term-tab').forEach(t => {
       (t as HTMLElement).classList.toggle('active', (t as HTMLElement).dataset['id'] === id);
     });
 
-    // Show/hide panes (only non-split panes)
-    document.querySelectorAll('#terminal-panes .term-pane:not(#terminal-pane-split)').forEach(p => {
-      const el = p as HTMLElement;
-      el.classList.toggle('active', el.id === `terminal-pane-${id}`);
+    // Pane focus border — all panes stay visible; only the focused one gets the outline
+    document.querySelectorAll('#terminal-panes .term-pane').forEach(p => {
+      (p as HTMLElement).classList.toggle('pane-focused', (p as HTMLElement).id === `terminal-pane-${id}`);
     });
 
-    // Fire resize so xterm recalculates
+    // Route keyboard focus to the right xterm instance
+    this.shellTerminals.get(id)?.xterm.focus();
+
     window.dispatchEvent(new Event('resize'));
   }
 

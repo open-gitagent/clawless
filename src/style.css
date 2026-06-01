@@ -269,13 +269,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
   flex: 1; min-height: 0; display: flex; flex-direction: row; align-items: stretch;
   padding: 8px; background: var(--bg); overflow: hidden;
 }
-.term-pane { flex: 1; min-width: 0; display: none; flex-direction: column; }
-.term-pane.active { display: flex; }
+.term-pane { flex: 1; min-width: 150px; display: flex; flex-direction: column; }
+.term-pane.pane-focused { outline: 2px solid #388bfd; outline-offset: -2px; }
 .term-pane-inner { flex: 1; min-height: 0; position: relative; }
-
-.split-active .term-pane.active { display: flex; flex: 1; }
-.split-active .term-pane-split { display: flex; flex: 1; }
-.split-active .resize-split { display: block; margin: 0 2px; }
 
 .xterm { height: 100%; }
 .xterm-viewport { overflow-y: auto !important; }
