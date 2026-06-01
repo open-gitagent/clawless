@@ -19,9 +19,11 @@ export class ContainerManager {
   private wc: WebContainer | null = null;
   private shellProcess: WebContainerProcess | null = null;
   private shellWriter: WritableStreamDefaultWriter<string> | null = null;
-  // Map of dynamic shell id → process/writer
+  // Map of dynamic shell id → process/writer/listeners
   private shellProcesses = new Map<string, WebContainerProcess>();
   private shellWriters = new Map<string, WritableStreamDefaultWriter<string>>();
+  private shellOnDataDisposables = new Map<string, { dispose(): void }>();
+  private shellResizeHandlers = new Map<string, () => void>();
   private _status: ContainerStatus = 'booting';
   private onStatusChange?: (s: ContainerStatus) => void;
 
@@ -493,20 +495,60 @@ export class ContainerManager {
     const writer = proc.input.getWriter();
     this.shellWriters.set(id, writer);
 
-    terminal.onData((data) => {
+    const onDataDisposable = terminal.onData((data) => {
       writer.write(data);
       this.audit?.logStdin(data);
     });
+    this.shellOnDataDisposables.set(id, onDataDisposable);
 
     await writer.write('cd workspace\nclear\n');
 
-    // Keep xterm in sync with container process when terminal is resized
-    window.addEventListener('resize', () => {
-      const p = this.shellProcesses.get(id);
-      if (!p) return;
+    const resizeHandler = () => {
+      if (!this.shellProcesses.has(id)) return;
       const { cols, rows } = terminal.dimensions;
-      p.resize({ cols, rows });
+      proc.resize({ cols, rows });
+    };
+    this.shellResizeHandlers.set(id, resizeHandler);
+    window.addEventListener('resize', resizeHandler);
+
+    proc.exit.then((code) => {
+      this.activeProcessCount--;
+      this.audit?.log('process.exit', `/bin/jsh (shell:${id}) exited ${code}`, { exitCode: code }, { source: 'user' });
+      this._cleanupShellListeners(id);
     });
+  }
+
+  /** Remove the resize listener and onData disposable for a dynamic shell. */
+  private _cleanupShellListeners(id: string): void {
+    const resizeHandler = this.shellResizeHandlers.get(id);
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      this.shellResizeHandlers.delete(id);
+    }
+    this.shellOnDataDisposables.get(id)?.dispose();
+    this.shellOnDataDisposables.delete(id);
+    this.shellProcesses.delete(id);
+    const writer = this.shellWriters.get(id);
+    if (writer) {
+      writer.close().catch(() => {});
+      this.shellWriters.delete(id);
+    }
+  }
+
+  /** Kill a dynamic shell and immediately release its listeners. */
+  killShell(id: string): void {
+    // Stop routing keystrokes immediately
+    this.shellOnDataDisposables.get(id)?.dispose();
+    this.shellOnDataDisposables.delete(id);
+
+    const resizeHandler = this.shellResizeHandlers.get(id);
+    if (resizeHandler) {
+      window.removeEventListener('resize', resizeHandler);
+      this.shellResizeHandlers.delete(id);
+    }
+
+    // kill() resolves the exit promise, which handles activeProcessCount and map cleanup
+    this.shellProcesses.get(id)?.kill();
   }
 
   async sendToShell(command: string): Promise<void> {

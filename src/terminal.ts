@@ -64,11 +64,12 @@ export class TerminalManager {
   private onDataDisposable: { dispose(): void } | null = null;
 
   /** Register a single handler for user keystrokes (sent to shell stdin). */
-  onData(handler: (data: string) => void): void {
+  onData(handler: (data: string) => void): { dispose(): void } {
     if (this.onDataDisposable) {
       this.onDataDisposable.dispose();
     }
     this.onDataDisposable = this.xterm.onData(handler);
+    return this.onDataDisposable;
   }
 
   /** Current terminal dimensions for pty resize. */
