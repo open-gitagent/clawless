@@ -311,11 +311,11 @@ export class UIManager {
     closeBtn.textContent = '×';
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Remove pane
+      this.container.killShell(id);
       document.getElementById(`terminal-pane-${id}`)?.remove();
+      this.shellTerminals.get(id)?.dispose();
       this.shellTerminals.delete(id);
       tab.remove();
-      // Switch back to agent tab
       this.setActiveTerminalTab('agent');
     });
 
