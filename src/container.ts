@@ -450,7 +450,8 @@ export class ContainerManager {
       this.audit?.logStdin(data);
     });
 
-    await this.shellWriter.write('cd workspace\nclear\n');
+    await this.shellWriter.write('cd workspace\n');
+    terminal.write('\x1b[2J\x1b[H'); // erase screen directly — avoids jsh exitCode crash on clear(1)
     window.addEventListener('resize', () => this.resizeShell(terminal));
   }
 
@@ -501,7 +502,8 @@ export class ContainerManager {
     });
     this.shellOnDataDisposables.set(id, onDataDisposable);
 
-    await writer.write('cd workspace\nclear\n');
+    await writer.write('cd workspace\n');
+    terminal.write('\x1b[2J\x1b[H'); // erase screen directly — avoids jsh exitCode crash on clear(1)
 
     const resizeHandler = () => {
       if (!this.shellProcesses.has(id)) return;
