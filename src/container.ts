@@ -490,7 +490,7 @@ export class ContainerManager {
           this.processOutputChunk(chunk, terminal, 'user');
         },
       }),
-    );
+    ).catch(() => {}); // stream is closed when the process exits; suppress the resulting rejection
 
     const writer = proc.input.getWriter();
     this.shellWriters.set(id, writer);
@@ -511,8 +511,8 @@ export class ContainerManager {
     this.shellResizeHandlers.set(id, resizeHandler);
     window.addEventListener('resize', resizeHandler);
 
-    proc.exit.then((code) => {
-      const exitCode = Number(code);
+    // proc.exit resolves to the plain exit-code number — use it directly
+    proc.exit.then((exitCode) => {
       if (!this.shellProcesses.has(id)) return;
       this.activeProcessCount--;
       this.audit?.log('process.exit', `/bin/jsh (shell:${id}) exited ${exitCode}`, { exitCode }, { source: 'user' });
